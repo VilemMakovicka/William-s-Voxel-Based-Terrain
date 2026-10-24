@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.IO;
 using UnityEditor;
 using UnityEngine;
 
@@ -12,7 +11,7 @@ namespace vilemmakovicka.wvbterrain {
         public enum ToolMode { Sculpt, Paint }
         private ToolMode activeTool = ToolMode.Sculpt;
 
-        private int selectedLayerIndex = 0; // 0: Rock (R), 1: Grass (G), 2: Dirt (B), 3: Cobble (A)
+        private int selectedLayerIndex = 0;
         private readonly string[] layerDescriptions = { "(R)", "(G)", "(B)", "(A)" };
 
         private static float brushRadius = 4f;
@@ -31,15 +30,12 @@ namespace vilemmakovicka.wvbterrain {
         private SerializedProperty chunksYProp;
         private SerializedProperty chunksZProp;
         private SerializedProperty voxelScaleProp;
-        private SerializedProperty isoLevelProp;
-        private SerializedProperty terrainMaterialProp;
+
 
         private void OnEnable() {
             world = (VoxelWorld)target;
             isDirty = false;
-            //if(world.isEditingMode) world.InitializeWorld();
 
-            // Attempts to find target material serialized property on VoxelWorld
             materialProp = serializedObject.FindProperty("terrainMaterial")
                         ?? serializedObject.FindProperty("material")
                         ?? serializedObject.FindProperty("targetMaterial");
@@ -55,8 +51,6 @@ namespace vilemmakovicka.wvbterrain {
             chunksYProp = serializedObject.FindProperty("chunksY");
             chunksZProp = serializedObject.FindProperty("chunksZ");
             voxelScaleProp = serializedObject.FindProperty("voxelScale");
-            isoLevelProp = serializedObject.FindProperty("isoLevel");
-            terrainMaterialProp = serializedObject.FindProperty("terrainMaterial");
         }
 
         private void OnDisable() {
@@ -74,29 +68,10 @@ namespace vilemmakovicka.wvbterrain {
             if (transformSerializedObject != null && localPositionProp != null) {
                 transformSerializedObject.Update();
 
-                // Draws a clean Vector3 field mapped directly to transform.localPosition
                 EditorGUILayout.PropertyField(localPositionProp, new GUIContent("Position"));
 
-                // Applies undo/redo records and marks the scene dirty if modified
                 transformSerializedObject.ApplyModifiedProperties();
             }
-
-            // Size
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.PrefixLabel("Size");
-            EditorGUILayout.PropertyField(chunksXProp, GUIContent.none);
-            EditorGUILayout.PropertyField(chunksYProp, GUIContent.none);
-            EditorGUILayout.PropertyField(chunksZProp, GUIContent.none);
-            EditorGUILayout.EndHorizontal();
-
-            // Enforce positive chunk counts
-            chunksXProp.intValue = Mathf.Max(1, chunksXProp.intValue);
-            chunksYProp.intValue = Mathf.Max(1, chunksYProp.intValue);
-            chunksZProp.intValue = Mathf.Max(1, chunksZProp.intValue);
-
-            // Voxel size
-            EditorGUILayout.PropertyField(voxelScaleProp, new GUIContent("Voxel Scale (m)"));
-            voxelScaleProp.floatValue = Mathf.Max(0.01f, voxelScaleProp.floatValue);
 
             // Locked mode
             if (world.IsBaked || !world.isEditingMode) {
@@ -121,11 +96,44 @@ namespace vilemmakovicka.wvbterrain {
             }
 
             EditorGUILayout.Space(10);
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            EditorGUILayout.LabelField("Terrain Initialization", EditorStyles.boldLabel);
+            // Size in chunks
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.PrefixLabel("Size in chunks");
+            EditorGUILayout.LabelField("x", GUILayout.Width(10.0f));
+            EditorGUILayout.PropertyField(chunksXProp, GUIContent.none);
+            EditorGUILayout.LabelField("y", GUILayout.Width(10.0f));
+            EditorGUILayout.PropertyField(chunksYProp, GUIContent.none);
+            EditorGUILayout.LabelField("z", GUILayout.Width(10.0f));
+            EditorGUILayout.PropertyField(chunksZProp, GUIContent.none);
+            EditorGUILayout.EndHorizontal();
+
+            // Enforce positive chunk counts
+            chunksXProp.intValue = Mathf.Max(1, chunksXProp.intValue);
+            chunksYProp.intValue = Mathf.Max(1, chunksYProp.intValue);
+            chunksZProp.intValue = Mathf.Max(1, chunksZProp.intValue);
+
+            // Voxel size
+            EditorGUILayout.PropertyField(voxelScaleProp, new GUIContent("Voxel Scale"));
+            voxelScaleProp.floatValue = Mathf.Max(0.01f, voxelScaleProp.floatValue);
+
+            EditorGUILayout.Space(10);
+            if (GUILayout.Button("Reset & Build new terrain (Removes current terrain from disk )")) {
+                if (EditorUtility.DisplayDialog("Reset Terrain?", "This will wipe current terrain density back to flat baseline. Continue?", "Yes", "No")) {
+                    world.InitializeWorld(force: true);
+                    world.SaveToDisk();
+                }
+            }
+
+            EditorGUILayout.EndVertical();
+
+            EditorGUILayout.Space(10);
             DrawMaterialSection();
 
             EditorGUILayout.Space(10);
             EditorGUILayout.LabelField("Terrain Editing Mode", EditorStyles.boldLabel);
-            activeTool = (ToolMode)GUILayout.Toolbar((int)activeTool, new string[] { "Sculpt / Shape", "Texture Paint" });
+            activeTool = (ToolMode)GUILayout.Toolbar((int)activeTool, new string[] { "Sculpt", "Texture Paint" });
 
             EditorGUILayout.Space(5);
             brushRadius = EditorGUILayout.Slider("Brush Radius", brushRadius, 1f, 25f);
@@ -150,17 +158,17 @@ namespace vilemmakovicka.wvbterrain {
             else {
                 EditorGUILayout.HelpBox(
                     "Sculpt Mode Hotkeys:\n" +
-                    "• Left Click: Raise / Extrude\n" +
-                    "• Shift + Left Click: Carve / Dig\n" +
-                    "• Ctrl + Left Click: Smooth",
+                    " • Left Click: Raise / Extrude\n" +
+                    " • Shift + Left Click: Carve / Dig\n" +
+                    " • Ctrl + Left Click: Smooth",
                     MessageType.Info
                 );
             }
 
             // Storage
-            EditorGUILayout.Space(10);
+            /*EditorGUILayout.Space(10);
             EditorGUILayout.LabelField("Persistence & Storage", EditorStyles.boldLabel);
-
+            
             EditorGUILayout.BeginHorizontal();
             if (GUILayout.Button("Save Terrain to Disk")) {
                 world.SaveToDisk();
@@ -168,30 +176,11 @@ namespace vilemmakovicka.wvbterrain {
             if (GUILayout.Button("Reload from Disk")) {
                 world.InitializeWorld(force: false);
             }
-            EditorGUILayout.EndHorizontal();
-
-            EditorGUILayout.Space(10);
-            if (GUILayout.Button("Reset & Reinitialize Entire World (Wipes Disk)")) {
-                if (EditorUtility.DisplayDialog("Reset Terrain?", "This will wipe current terrain density back to flat baseline. Continue?", "Yes", "No")) {
-                    world.InitializeWorld(force: true);
-                    world.SaveToDisk();
-                }
-            }
-
-            /*EditorGUILayout.Space(10);
-            EditorGUILayout.LabelField("Lighting & GI", EditorStyles.boldLabel);
-            if (GUILayout.Button("Generate Lightmap UVs (Prepare for Bake)")) {
-                world.PrepareForLightmapBake();
-            }*/
+            EditorGUILayout.EndHorizontal();*/
 
             EditorGUILayout.Space(5);
             EditorGUILayout.BeginHorizontal();
-            /*
-            GUI.backgroundColor = new Color(0.4f, 1f, 0.4f);
-            if (GUILayout.Button("Unlock / Resume Sculpting", GUILayout.Height(28))) {
-                world.UnlockForEditing();
-            }
-            */
+
             GUI.backgroundColor = new Color(0.5f, 0.8f, 1f);
             if (GUILayout.Button("Bake Meshes For Build", GUILayout.Height(28))) {
                 world.LockAndBake();
@@ -320,7 +309,7 @@ namespace vilemmakovicka.wvbterrain {
         private void CreateNewMaterial(Material referenceMat) {
             Shader targetShader = referenceMat != null && referenceMat.shader != null
                 ? referenceMat.shader
-                : Shader.Find("Custom/URP_VoxelTriplanarSplat") ?? Shader.Find("Standard");
+                : Shader.Find("Custom/wvbt_triplanar") ?? Shader.Find("Standard");
 
             string defaultName = referenceMat != null ? $"{referenceMat.name}_Variant.mat" : "Terrain_Material.mat";
             string path = EditorUtility.SaveFilePanelInProject("Save Terrain Material", defaultName, "mat", "Select a save location.");
@@ -359,7 +348,7 @@ namespace vilemmakovicka.wvbterrain {
                         selectedMaterialIndex = matched.Count;
 
                     matched.Add(m);
-                    names.Add($"{m.name} ({Path.GetFileName(path)})");
+                    names.Add($"{m.name}.mat");
                 }
             }
 

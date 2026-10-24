@@ -6,7 +6,7 @@ MonoImporter:
   defaultReferences:
   - terrainMaterial: {fileID: 2100000, guid: 4b9b89a46fd3917418f2a3291edf59b5, type: 2}
   executionOrder: 0
-  icon: {instanceID: 0}
+  icon: {fileID: 2800000, guid: 1333705734152a44f9bf76cbb8395d8c, type: 3}
   userData: 
   assetBundleName: 
   assetBundleVariant: 

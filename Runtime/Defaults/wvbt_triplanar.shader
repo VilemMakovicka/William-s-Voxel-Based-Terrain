@@ -10,13 +10,13 @@ Shader "Custom/wvbt_triplanar"
 
         [Header(Tiling and Blend)]
         _TextureScale("Texture Tiling", Float) = 0.2
-        _TriplanarSharpness("Projection Sharpness", Range(1.0, 16.0)) = 8.0
+        _TriplanarSharpness("Projection Sharpness", Range(1.0, 16.0)) = 4.0
 
         [Header(Wireframe)]
         [Toggle(_SHOWWIREFRAME_ON)] _ShowWireframe("Enable Culled Wireframe", Float) = 0
         _WireframeColor("Wireframe Color", Color) = (0.05, 0.05, 0.05, 0.7)
-        //_WireframeGridSize("Wireframe Grid Spacing", Float) = 1.0
-        _WireframeThickness("Wireframe Thickness", Range(0.01, 0.2)) = 0.04
+            //_WireframeGridSize("Wireframe Grid Spacing", Float) = 1.0
+            _WireframeThickness("Wireframe Thickness", Range(0.01, 0.2)) = 0.04
     }
 
         SubShader
@@ -154,7 +154,7 @@ Shader "Custom/wvbt_triplanar"
                     float3 wire = smoothstep(width * _WireframeThickness, width * (_WireframeThickness + 1.0), grid);
                     float lineMask = min(min(wire.x, wire.y), wire.z);
 
-                    finalColor = lerp(_WireframeColor.rgb, finalColor, 1 - (1 -lineMask) * _WireframeColor.a);
+                    finalColor = lerp(_WireframeColor.rgb, finalColor, 1 - (1 - lineMask) * _WireframeColor.a);
     #endif
                     finalColor = MixFog(finalColor, input.fogFactor);
 
@@ -205,91 +205,91 @@ Shader "Custom/wvbt_triplanar"
                 ENDHLSL
             }
 
-            // ------------------------------------------------------------------
-            // DepthNormals Pass
-            // Writes depth + world-space normals for Screen-Space AO (SSAO) and Decals
-                Pass
-            {
-                Name "DepthNormals"
-                Tags { "LightMode" = "DepthNormals" }
+                    // ------------------------------------------------------------------
+                    // DepthNormals Pass
+                    // Writes depth + world-space normals for Screen-Space AO (SSAO) and Decals
+                        Pass
+                    {
+                        Name "DepthNormals"
+                        Tags { "LightMode" = "DepthNormals" }
 
-                ZWrite On
-                Cull Back
+                        ZWrite On
+                        Cull Back
 
-                HLSLPROGRAM
-                #pragma vertex DepthNormalsVertex
-                #pragma fragment DepthNormalsFragment
+                        HLSLPROGRAM
+                        #pragma vertex DepthNormalsVertex
+                        #pragma fragment DepthNormalsFragment
 
-                #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+                        #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 
-                struct Attributes
-                {
-                    float4 positionOS : POSITION;
-                    float3 normalOS   : NORMAL;
-                };
+                        struct Attributes
+                        {
+                            float4 positionOS : POSITION;
+                            float3 normalOS   : NORMAL;
+                        };
 
-                struct Varyings
-                {
-                    float4 positionCS : SV_POSITION;
-                    float3 normalWS   : TEXCOORD0;
-                };
+                        struct Varyings
+                        {
+                            float4 positionCS : SV_POSITION;
+                            float3 normalWS   : TEXCOORD0;
+                        };
 
-                Varyings DepthNormalsVertex(Attributes input)
-                {
-                    Varyings output;
-                    output.positionCS = TransformObjectToHClip(input.positionOS.xyz);
-                    output.normalWS = TransformObjectToWorldNormal(input.normalOS);
-                    return output;
-                }
+                        Varyings DepthNormalsVertex(Attributes input)
+                        {
+                            Varyings output;
+                            output.positionCS = TransformObjectToHClip(input.positionOS.xyz);
+                            output.normalWS = TransformObjectToWorldNormal(input.normalOS);
+                            return output;
+                        }
 
-                half4 DepthNormalsFragment(Varyings input) : SV_Target
-                {
-                    float3 normalWS = normalize(input.normalWS);
-                    return half4(NormalizeNormalPerPixel(normalWS), 0.0);
-                }
-                ENDHLSL
-            }
+                        half4 DepthNormalsFragment(Varyings input) : SV_Target
+                        {
+                            float3 normalWS = normalize(input.normalWS);
+                            return half4(NormalizeNormalPerPixel(normalWS), 0.0);
+                        }
+                        ENDHLSL
+                    }
 
-            Pass
-            {
-                Name "Meta"
-                Tags { "LightMode" = "Meta" }
+                    Pass
+                    {
+                        Name "Meta"
+                        Tags { "LightMode" = "Meta" }
 
-                Cull Off
+                        Cull Off
 
-                HLSLPROGRAM
-                #pragma vertex vert
-                #pragma fragment frag
+                        HLSLPROGRAM
+                        #pragma vertex vert
+                        #pragma fragment frag
 
-                #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
-                #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/MetaInput.hlsl"
+                        #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+                        #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/MetaInput.hlsl"
 
-                struct Attributes
-                {
-                    float4 positionOS : POSITION;
-                    float2 uv1        : TEXCOORD1;
-                };
+                        struct Attributes
+                        {
+                            float4 positionOS : POSITION;
+                            float2 uv1        : TEXCOORD1;
+                        };
 
-                struct Varyings
-                {
-                    float4 positionCS : SV_POSITION;
-                };
+                        struct Varyings
+                        {
+                            float4 positionCS : SV_POSITION;
+                        };
 
-                Varyings vert(Attributes input)
-                {
-                    Varyings output;
-                    output.positionCS = UnityMetaVertexPosition(input.positionOS.xyz, input.uv1, input.uv1, unity_LightmapST, unity_DynamicLightmapST);
-                    return output;
-                }
+                        Varyings vert(Attributes input)
+                        {
+                            Varyings output;
+                            output.positionCS = UnityMetaVertexPosition(input.positionOS.xyz, input.uv1, input.uv1, unity_LightmapST, unity_DynamicLightmapST);
+                            return output;
+                        }
 
-                half4 frag(Varyings input) : SV_Target
-                {
-                    UnityMetaInput metaInput = (UnityMetaInput)0;
-                    metaInput.Albedo = half3(0.5, 0.5, 0.5);
-                    return UnityMetaFragment(metaInput);
-                }
-                ENDHLSL
-            }
+                        half4 frag(Varyings input) : SV_Target
+                        {
+                            UnityMetaInput metaInput = (UnityMetaInput)0;
+                            metaInput.Albedo = half3(0.5, 0.5, 0.5);
+                            return UnityMetaFragment(metaInput);
+                        }
+                        ENDHLSL
+                    }
         }
             FallBack "Hidden/Universal Render Pipeline/FallbackError"
 }
