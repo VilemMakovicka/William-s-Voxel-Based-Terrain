@@ -11,25 +11,9 @@ namespace vilemmakovicka.wvbterrain {
             GameObject go = new GameObject("Voxel Terrain");
             VoxelWorld voxelWorld = go.AddComponent<VoxelWorld>();
 
-	    Shader shader = Shader.Find("Custom/wvbt_triplanar");
-
-            if (shader == null)
-            {
-                shader = Shader.Find("Universal Render Pipeline/Lit");
-            }
-
-            if (shader != null)
-            {
-                Material mat = new Material(shader);
-                mat.name = "VoxelTerrain_Material";
-
-                Texture2D dirt = AssetDatabase.LoadAssetAtPath<Texture2D>("Packages/com.vilemmakovicka.wvbterrain/Runtime/Defaults/dirt.png");
-                Texture2D grass = AssetDatabase.LoadAssetAtPath<Texture2D>("Packages/com.vilemmakovicka.wvbterrain/Runtime/Defaults/grass.png");
-                Texture2D rock = AssetDatabase.LoadAssetAtPath<Texture2D>("Packages/com.vilemmakovicka.wvbterrain/Runtime/Defaults/rock.png");
-
-                if (dirt != null) mat.SetTexture("_MainTex", dirt);
-
-                voxelWorld.terrainMaterial = mat;
+	    Material defaultMat = AssetDatabase.LoadAssetAtPath<Material>("Assets/shared/tools/voxel terrain/VoxelTriplanarDefaultMaterial.mat");
+            if (defaultMat != null) {
+                voxelWorld.terrainMaterial = defaultMat;
             }
 
             GameObject parent = menuCommand.context as GameObject;
