@@ -75,19 +75,19 @@ namespace vilemmakovicka.wvbterrain {
 
             // Locked mode
             if (world.IsBaked || !world.isEditingMode) {
-                Material curMat = GetTargetMaterial();
-                Material assignedMat = (Material)EditorGUILayout.ObjectField("Active Material", curMat, typeof(Material), false);
-                if (EditorGUI.EndChangeCheck()) { SetTargetMaterial(assignedMat); }
+                //Material curMat = GetTargetMaterial();
+                //Material assignedMat = (Material)EditorGUILayout.ObjectField("Active Material", curMat, typeof(Material), false);
+                //if (EditorGUI.EndChangeCheck()) { SetTargetMaterial(assignedMat); }
 
                 EditorGUILayout.HelpBox(
                     world.IsBaked
-                        ? "Terrain is currently BAKED (Static .asset Meshes).\nProcedural generation is completely disabled."
-                        : "Terrain is currently LOCKED.\nClick Unlock to sculpt or paint.",
+                        ? "Terrain is currently BAKED."
+                        : "Terrain is currently LOCKED.",
                     MessageType.Info
                 );
 
                 GUI.backgroundColor = new Color(0.4f, 1f, 0.4f);
-                if (GUILayout.Button("Unlock / Enter Edit Mode", GUILayout.Height(35))) {
+                if (GUILayout.Button("Enter Edit Mode", GUILayout.Height(35))) {
                     world.UnlockForEditing();
                     EditorUtility.SetDirty(world);
                 }
@@ -98,6 +98,7 @@ namespace vilemmakovicka.wvbterrain {
             EditorGUILayout.Space(10);
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
             EditorGUILayout.LabelField("Terrain Initialization", EditorStyles.boldLabel);
+            EditorGUILayout.Space(5);
             // Size in chunks
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.PrefixLabel("Size in chunks");
@@ -119,7 +120,7 @@ namespace vilemmakovicka.wvbterrain {
             voxelScaleProp.floatValue = Mathf.Max(0.01f, voxelScaleProp.floatValue);
 
             EditorGUILayout.Space(10);
-            if (GUILayout.Button("Reset & Build new terrain (Removes current terrain from disk )")) {
+            if (GUILayout.Button("Reset terrain")) {
                 if (EditorUtility.DisplayDialog("Reset Terrain?", "This will wipe current terrain density back to flat baseline. Continue?", "Yes", "No")) {
                     world.InitializeWorld(force: true);
                     world.SaveToDisk();
@@ -132,7 +133,9 @@ namespace vilemmakovicka.wvbterrain {
             DrawMaterialSection();
 
             EditorGUILayout.Space(10);
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
             EditorGUILayout.LabelField("Terrain Editing Mode", EditorStyles.boldLabel);
+            EditorGUILayout.Space(5);
             activeTool = (ToolMode)GUILayout.Toolbar((int)activeTool, new string[] { "Sculpt", "Texture Paint" });
 
             EditorGUILayout.Space(5);
@@ -151,7 +154,7 @@ namespace vilemmakovicka.wvbterrain {
                 EditorGUILayout.HelpBox(
                     "Paint Mode:\n" +
                     "• Left Click + Drag: Paint selected texture\n" +
-                    "Uses Vertex Colors (R = Rock, G = Grass, B = Dirt, A = Path).",
+                    "(Uses Vertex Colors)",
                     MessageType.Info
                 );
             }
@@ -164,6 +167,8 @@ namespace vilemmakovicka.wvbterrain {
                     MessageType.Info
                 );
             }
+
+            EditorGUILayout.EndVertical();
 
             // Storage
             /*EditorGUILayout.Space(10);
@@ -182,7 +187,7 @@ namespace vilemmakovicka.wvbterrain {
             EditorGUILayout.BeginHorizontal();
 
             GUI.backgroundColor = new Color(0.5f, 0.8f, 1f);
-            if (GUILayout.Button("Bake Meshes For Build", GUILayout.Height(28))) {
+            if (GUILayout.Button("Bake terrain lightmaps & LODs", GUILayout.Height(28))) {
                 world.LockAndBake();
                 EditorUtility.SetDirty(world);
             }
@@ -221,31 +226,22 @@ namespace vilemmakovicka.wvbterrain {
 
         private void DrawMaterialSection() {
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-            EditorGUILayout.LabelField("Terrain Material & Shader", EditorStyles.boldLabel);
-
+            EditorGUILayout.LabelField("Terrain Material", EditorStyles.boldLabel);
+            EditorGUILayout.Space(5);
             Material currentMat = GetTargetMaterial();
 
-            EditorGUI.BeginChangeCheck();
-            Material assignedMat = (Material)EditorGUILayout.ObjectField("Active Material", currentMat, typeof(Material), false);
-            if (EditorGUI.EndChangeCheck()) {
-                SetTargetMaterial(assignedMat);
-                RefreshCompatibleMaterials();
-                currentMat = assignedMat;
-            }
+            //EditorGUI.BeginChangeCheck();
+            //Material assignedMat = (Material)EditorGUILayout.ObjectField("Active Material", currentMat, typeof(Material), false);
+            //if (EditorGUI.EndChangeCheck()) {
+            //    SetTargetMaterial(assignedMat);
+            //    RefreshCompatibleMaterials();
+            //    currentMat = assignedMat;
+            //}
 
-            EditorGUILayout.BeginHorizontal();
-            if (GUILayout.Button("Create New Material", GUILayout.Height(22))) {
-                CreateNewMaterial(currentMat);
-                currentMat = GetTargetMaterial();
-            }
-            if (GUILayout.Button("Refresh List", GUILayout.Width(90), GUILayout.Height(22))) {
-                RefreshCompatibleMaterials();
-            }
-            EditorGUILayout.EndHorizontal();
 
             if (currentMat != null && currentMat.shader != null) {
                 if (compatibleMaterials.Length > 0) {
-                    int newIndex = EditorGUILayout.Popup("Same Shader Mats", selectedMaterialIndex, compatibleMaterialNames);
+                    int newIndex = EditorGUILayout.Popup("Current material", selectedMaterialIndex, compatibleMaterialNames);
                     if (newIndex != selectedMaterialIndex && newIndex >= 0 && newIndex < compatibleMaterials.Length) {
                         selectedMaterialIndex = newIndex;
                         SetTargetMaterial(compatibleMaterials[newIndex]);
@@ -256,12 +252,22 @@ namespace vilemmakovicka.wvbterrain {
                     EditorGUILayout.HelpBox("No other materials in the project share this shader.", MessageType.None);
                 }
 
-                EditorGUILayout.Space(6);
-                DrawInlineTextureSlots(currentMat);
+                //EditorGUILayout.Space(6);
+                //DrawInlineTextureSlots(currentMat);
             }
             else {
                 EditorGUILayout.HelpBox("Assign or create a material to view texture slots and shader options.", MessageType.Warning);
             }
+
+            EditorGUILayout.BeginHorizontal();
+            if (GUILayout.Button("Create New Material", GUILayout.Height(22))) {
+                CreateNewMaterial(currentMat);
+                currentMat = GetTargetMaterial();
+            }
+            if (GUILayout.Button("Refresh List", GUILayout.Width(120), GUILayout.Height(22))) {
+                RefreshCompatibleMaterials();
+            }
+            EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.EndVertical();
         }
@@ -413,10 +419,10 @@ namespace vilemmakovicka.wvbterrain {
 
         private Color GetTargetColor(int layerIndex) {
             switch (layerIndex) {
-                case 0: return new Color(1f, 0f, 0f, 0f); // Rock (R)
-                case 1: return new Color(0f, 1f, 0f, 0f); // Grass (G)
-                case 2: return new Color(0f, 0f, 1f, 0f); // Dirt (B)
-                case 3: return new Color(0f, 0f, 0f, 1f); // Cobble (A)
+                case 0: return new Color(1f, 0f, 0f, 0f); // (R)
+                case 1: return new Color(0f, 1f, 0f, 0f); // (G)
+                case 2: return new Color(0f, 0f, 1f, 0f); // (B)
+                case 3: return new Color(0f, 0f, 0f, 1f); // (A)
                 default: return new Color(1f, 0f, 0f, 0f);
             }
         }
@@ -482,7 +488,7 @@ namespace vilemmakovicka.wvbterrain {
 
         #endregion
 
-        public class VoxelTerrainAutoSaver : UnityEditor.AssetModificationProcessor {
+        public class VoxelTerrainAutoSaver : AssetModificationProcessor {
             private static string[] OnWillSaveAssets(string[] paths) {
                 // When scene is saved, auto-write all voxel worlds to their .bytes files
                 VoxelWorld[] worlds = Object.FindObjectsOfType<VoxelWorld>();
