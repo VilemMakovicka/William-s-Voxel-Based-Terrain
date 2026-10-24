@@ -11,7 +11,7 @@ namespace vilemmakovicka.wvbterrain {
             GameObject go = new GameObject("Voxel Terrain");
             VoxelWorld voxelWorld = go.AddComponent<VoxelWorld>();
 
-	    Material defaultMat = AssetDatabase.LoadAssetAtPath<Material>("Packages/com.vilemmakovicka.wvbterrain/Runtime/Defaults/.wvbt_default.mat");
+	    Material defaultMat = AssetDatabase.LoadAssetAtPath<Material>("Packages/com.vilemmakovicka.wvbterrain/Runtime/Defaults/wvbt_default.mat");
             if (defaultMat != null) {
                 voxelWorld.terrainMaterial = defaultMat;
             }
