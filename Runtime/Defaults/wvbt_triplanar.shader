@@ -10,7 +10,7 @@ Shader "Custom/wvbt_triplanar"
 
         [Header(Tiling and Blend)]
         _TextureScale("Texture Tiling", Float) = 0.2
-        _TriplanarSharpness("Projection Sharpness", Range(1.0, 16.0)) = 4.0
+        _TriplanarSharpness("Projection Sharpness", Range(1.0, 16.0)) = 8.0
 
         [Header(Wireframe)]
         [Toggle(_SHOWWIREFRAME_ON)] _ShowWireframe("Enable Culled Wireframe", Float) = 0
