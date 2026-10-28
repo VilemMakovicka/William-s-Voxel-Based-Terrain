@@ -127,12 +127,19 @@ Shader "Custom/wvbt_triplanar"
                     half3 cDirt = SampleTriplanar(_TexDirt,  sampler_TexDirt,  input.positionWS, blend).rgb;
                     half3 cPath = SampleTriplanar(_TexPath,  sampler_TexPath,  input.positionWS, blend).rgb;
 
-                    // Base rock + splat layers
-                    half3 albedo = cRock;
                     float4 splat = saturate(input.color);
-                    albedo = lerp(albedo, cGrass, splat.g);
-                    albedo = lerp(albedo, cDirt, splat.b);
-                    albedo = lerp(albedo, cPath, splat.a);
+
+                    // Sum weights to normalize them
+                    float totalWeight = splat.r + splat.g + splat.b + splat.a;
+
+                    // Prevent division by zero if all vertex color channels are 0
+                    splat /= max(totalWeight, 0.0001);
+
+                    // Weighted sum blend
+                    half3 albedo = cRock * splat.r
+                                 + cGrass * splat.g
+                                 + cDirt * splat.b
+                                 + cPath * splat.a;
 
                     // Lighting
                     half3 bakedGI = SAMPLE_GI(input.lightmapUV, input.vertexSH, input.normalWS);

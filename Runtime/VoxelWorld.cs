@@ -9,53 +9,67 @@ using UnityEngine.Rendering;
 
 #if UNITY_EDITOR
 using UnityEditor;
+using UnityEditor.SceneManagement;
 #endif
 
 namespace vilemmakovicka.wvbterrain {
+    /// <summary>
+    /// Component for the terrain object. 
+    /// </summary>
     [ExecuteAlways]
     [SelectionBase]
     public class VoxelWorld : MonoBehaviour {
+        
         public int chunksX = 4;
         public int chunksY = 2;
         public int chunksZ = 4;
 
+        /// <summary>
+        /// Size of each chunk in voxels. 
+        /// </summary>
         public static readonly int3 ChunkSize = new int3(16, 16, 16);
+        public static Vector3 ChunkSizeV3 => new Vector3(ChunkSize.x, ChunkSize.y, ChunkSize.z);
+        /// <summary>
+        /// Size of individual voxels of chunks.
+        /// For example: If chunkSize is (16, 16, 16) and the voxelScale is 2, size of one chunk is (32m x 32m x 32m)
+        /// </summary>
         public float voxelScale = 1.0f;
-        [Range(0f, 1f)] public float isoLevel = 0.5f;
+
+        public float isoLevel = 0.5f;
 
         public Material terrainMaterial;
 
-        private Dictionary<Vector3Int, VoxelChunk> chunks = new Dictionary<Vector3Int, VoxelChunk>();
+        private readonly Dictionary<Vector3Int, VoxelChunk> chunks = new Dictionary<Vector3Int, VoxelChunk>();
         private float[,,] worldDensity;
         private Color[,,] worldColors;
 
-        private int totalVoxelsX => chunksX * ChunkSize.x + 1;
-        private int totalVoxelsY => chunksY * ChunkSize.y + 1;
-        private int totalVoxelsZ => chunksZ * ChunkSize.z + 1;
+        private int TotalVoxelsX => chunksX * ChunkSize.x + 1;
+        private int TotalVoxelsY => chunksY * ChunkSize.y + 1;
+        private int TotalVoxelsZ => chunksZ * ChunkSize.z + 1;
 
         private NativeArray<int> nativeTriTable;
         private NativeArray<int> nativeEdgeTable;
         private NativeArray<int2> nativeEdgeCorners;
-
-        //[Header("Persistence")]
-        //[Tooltip("Unique ID for this terrain instance within the scene.")]
+        
         [SerializeField] private int uniqueTerrainID = 0;
         public TextAsset terrainDataAsset;
 
-        //[Header("Bake & Lock Status")]
         [SerializeField] private bool isBaked = false;
         [System.NonSerialized] public bool isEditingMode = false;
 
         public bool IsBaked => isBaked;
 
+        /// <summary>
+        /// 
+        /// </summary>
         public void LockAndBake() {
 #if UNITY_EDITOR
             BakeMeshesForBuild();
             isBaked = true;
             isEditingMode = false;
             EditorUtility.SetDirty(this);
-            UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(gameObject.scene);
-            Debug.Log("<color=cyan>[VoxelWorld]</color> Terrain locked and baked to static meshes.");
+            EditorSceneManager.MarkSceneDirty(gameObject.scene);
+            Debug.Log("<color=cyan>[ Voxel terrain ]</color> Terrain locked and baked to static meshes.");
 #endif
         }
 
@@ -106,9 +120,11 @@ namespace vilemmakovicka.wvbterrain {
             UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(gameObject.scene);
 
             Debug.Log($"<color=cyan>[VoxelWorld]</color> Baked dynamic LODs (LOD0, LOD1, LOD2) to {folderPath}!");
+#endif
         }
 
         private void SaveMeshAsset(string path, Mesh m) {
+#if UNITY_EDITOR
             Mesh existing = AssetDatabase.LoadAssetAtPath<Mesh>(path);
             if (existing == null) {
                 AssetDatabase.CreateAsset(m, path);
@@ -117,6 +133,7 @@ namespace vilemmakovicka.wvbterrain {
                 existing.Clear();
                 EditorUtility.CopySerialized(m, existing);
             }
+#endif
         }
 
         /// <summary>
@@ -124,38 +141,45 @@ namespace vilemmakovicka.wvbterrain {
         /// so it doesn't interrupt active mesh serialization.
         /// </summary>
         private void SaveToDiskInternal() {
+#if UNITY_EDITOR
             if (worldDensity == null || worldColors == null) return;
 
             if (!Directory.Exists(SaveDirectory))
                 Directory.CreateDirectory(SaveDirectory);
 
-            using (BinaryWriter writer = new BinaryWriter(File.Open(SaveFilePath, FileMode.Create))) {
-                writer.Write(chunksX);
-                writer.Write(chunksY);
-                writer.Write(chunksZ);
-                writer.Write(hasBakedLightmapUVs);
+            using BinaryWriter writer = new BinaryWriter(File.Open(SaveFilePath, FileMode.Create));
+            writer.Write(chunksX);
+            writer.Write(chunksY);
+            writer.Write(chunksZ);
+            writer.Write(hasBakedLightmapUVs);
 
-                int totalX = totalVoxelsX;
-                int totalY = totalVoxelsY;
-                int totalZ = totalVoxelsZ;
+            int totalX = TotalVoxelsX;
+            int totalY = TotalVoxelsY;
+            int totalZ = TotalVoxelsZ;
 
-                for (int x = 0; x < totalX; x++)
-                    for (int y = 0; y < totalY; y++)
-                        for (int z = 0; z < totalZ; z++)
-                            writer.Write(worldDensity[x, y, z]);
-
-                for (int x = 0; x < totalX; x++)
-                    for (int y = 0; y < totalY; y++)
-                        for (int z = 0; z < totalZ; z++) {
-                            Color c = worldColors[x, y, z];
-                            writer.Write((byte)Mathf.RoundToInt(c.r * 255f));
-                            writer.Write((byte)Mathf.RoundToInt(c.g * 255f));
-                            writer.Write((byte)Mathf.RoundToInt(c.b * 255f));
-                            writer.Write((byte)Mathf.RoundToInt(c.a * 255f));
-                        }
+            // Save all voxel's densities
+            for (int x = 0; x < totalX; x++) {
+                for (int y = 0; y < totalY; y++) { 
+                    for (int z = 0; z < totalZ; z++) {
+                        writer.Write(worldDensity[x, y, z]);
+                    }
+                }
             }
-        }
+
+            // Save all voxel's colors
+            for (int x = 0; x < totalX; x++) {
+                for (int y = 0; y < totalY; y++) {
+                    for (int z = 0; z < totalZ; z++) {
+                        Color c = worldColors[x, y, z];
+                        writer.Write((byte)Mathf.RoundToInt(c.r * 255f));
+                        writer.Write((byte)Mathf.RoundToInt(c.g * 255f));
+                        writer.Write((byte)Mathf.RoundToInt(c.b * 255f));
+                        writer.Write((byte)Mathf.RoundToInt(c.a * 255f));
+                    }
+                }
+            }
 #endif
+        }
 
         public string SaveFileName {
             get {
@@ -241,9 +265,9 @@ namespace vilemmakovicka.wvbterrain {
                 writer.Write(chunksZ);
                 writer.Write(hasBakedLightmapUVs);
 
-                int totalX = totalVoxelsX;
-                int totalY = totalVoxelsY;
-                int totalZ = totalVoxelsZ;
+                int totalX = TotalVoxelsX;
+                int totalY = TotalVoxelsY;
+                int totalZ = TotalVoxelsZ;
 
                 for (int x = 0; x < totalX; x++) {
                     for (int y = 0; y < totalY; y++) {
@@ -295,9 +319,9 @@ namespace vilemmakovicka.wvbterrain {
                     chunksZ = reader.ReadInt32();
                     hasBakedLightmapUVs = reader.ReadBoolean();
 
-                    int totalX = totalVoxelsX;
-                    int totalY = totalVoxelsY;
-                    int totalZ = totalVoxelsZ;
+                    int totalX = TotalVoxelsX;
+                    int totalY = TotalVoxelsY;
+                    int totalZ = TotalVoxelsZ;
 
                     worldDensity = new float[totalX, totalY, totalZ];
                     worldColors = new Color[totalX, totalY, totalZ];
@@ -403,24 +427,24 @@ namespace vilemmakovicka.wvbterrain {
         }
 
         public Color GetColor(int x, int y, int z) {
-            if (x < 0 || x >= totalVoxelsX || y < 0 || y >= totalVoxelsY || z < 0 || z >= totalVoxelsZ)
+            if (x < 0 || x >= TotalVoxelsX || y < 0 || y >= TotalVoxelsY || z < 0 || z >= TotalVoxelsZ)
                 return new Color(0, 1, 0, 0);
             return worldColors[x, y, z];
         }
 
         public void SetColor(int x, int y, int z, Color c) {
-            if (x >= 0 && x < totalVoxelsX && y >= 0 && y < totalVoxelsY && z >= 0 && z < totalVoxelsZ)
+            if (x >= 0 && x < TotalVoxelsX && y >= 0 && y < TotalVoxelsY && z >= 0 && z < TotalVoxelsZ)
                 worldColors[x, y, z] = c;
         }
 
         public void Paint(Vector3 worldPoint, float brushRadius, float brushStrength, Color targetColor) {
             Vector3 localPos = transform.InverseTransformPoint(worldPoint) / voxelScale;
             int minX = Mathf.Max(0, Mathf.FloorToInt(localPos.x - brushRadius));
-            int maxX = Mathf.Min(totalVoxelsX - 1, Mathf.CeilToInt(localPos.x + brushRadius));
+            int maxX = Mathf.Min(TotalVoxelsX - 1, Mathf.CeilToInt(localPos.x + brushRadius));
             int minY = Mathf.Max(0, Mathf.FloorToInt(localPos.y - brushRadius));
-            int maxY = Mathf.Min(totalVoxelsY - 1, Mathf.CeilToInt(localPos.y + brushRadius));
+            int maxY = Mathf.Min(TotalVoxelsY - 1, Mathf.CeilToInt(localPos.y + brushRadius));
             int minZ = Mathf.Max(0, Mathf.FloorToInt(localPos.z - brushRadius));
-            int maxZ = Mathf.Min(totalVoxelsZ - 1, Mathf.CeilToInt(localPos.z + brushRadius));
+            int maxZ = Mathf.Min(TotalVoxelsZ - 1, Mathf.CeilToInt(localPos.z + brushRadius));
 
             HashSet<Vector3Int> dirtyChunks = new HashSet<Vector3Int>();
 
@@ -454,21 +478,19 @@ namespace vilemmakovicka.wvbterrain {
         }
 
         public void InitializeWorld(bool force = false) {
-            bool loaded = false;
-
             if (!force) {
-                loaded = LoadFromDisk();
+                LoadFromDisk();
             }
 
             if (worldDensity == null || worldColors == null || force) {
-                worldDensity = new float[totalVoxelsX, totalVoxelsY, totalVoxelsZ];
-                worldColors = new Color[totalVoxelsX, totalVoxelsY, totalVoxelsZ];
+                worldDensity = new float[TotalVoxelsX, TotalVoxelsY, TotalVoxelsZ];
+                worldColors = new Color[TotalVoxelsX, TotalVoxelsY, TotalVoxelsZ];
 
                 Color defaultColor = new Color(1f, 0f, 0f, 0f);
 
-                for (int x = 0; x < totalVoxelsX; x++) {
-                    for (int z = 0; z < totalVoxelsZ; z++) {
-                        for (int y = 0; y < totalVoxelsY; y++) {
+                for (int x = 0; x < TotalVoxelsX; x++) {
+                    for (int z = 0; z < TotalVoxelsZ; z++) {
+                        for (int y = 0; y < TotalVoxelsY; y++) {
                             worldDensity[x, y, z] = (y == 0) ? 1.0f : 0.0f;
                             worldColors[x, y, z] = defaultColor;
                         }
@@ -544,24 +566,24 @@ namespace vilemmakovicka.wvbterrain {
         }
 
         public float GetDensity(int x, int y, int z) {
-            if (x < 0 || x >= totalVoxelsX || y < 0 || y >= totalVoxelsY || z < 0 || z >= totalVoxelsZ)
+            if (x < 0 || x >= TotalVoxelsX || y < 0 || y >= TotalVoxelsY || z < 0 || z >= TotalVoxelsZ)
                 return 0f;
             return worldDensity[x, y, z];
         }
 
         public void SetDensity(int x, int y, int z, float val) {
-            if (x >= 0 && x < totalVoxelsX && y >= 0 && y < totalVoxelsY && z >= 0 && z < totalVoxelsZ)
+            if (x >= 0 && x < TotalVoxelsX && y >= 0 && y < TotalVoxelsY && z >= 0 && z < TotalVoxelsZ)
                 worldDensity[x, y, z] = Mathf.Clamp01(val);
         }
 
         public void Sculpt(Vector3 worldPoint, float brushRadius, float brushStrength) {
             Vector3 localPos = transform.InverseTransformPoint(worldPoint) / voxelScale;
             int minX = Mathf.Max(0, Mathf.FloorToInt(localPos.x - brushRadius));
-            int maxX = Mathf.Min(totalVoxelsX - 1, Mathf.CeilToInt(localPos.x + brushRadius));
+            int maxX = Mathf.Min(TotalVoxelsX - 1, Mathf.CeilToInt(localPos.x + brushRadius));
             int minY = Mathf.Max(0, Mathf.FloorToInt(localPos.y - brushRadius));
-            int maxY = Mathf.Min(totalVoxelsY - 1, Mathf.CeilToInt(localPos.y + brushRadius));
+            int maxY = Mathf.Min(TotalVoxelsY - 1, Mathf.CeilToInt(localPos.y + brushRadius));
             int minZ = Mathf.Max(0, Mathf.FloorToInt(localPos.z - brushRadius));
-            int maxZ = Mathf.Min(totalVoxelsZ - 1, Mathf.CeilToInt(localPos.z + brushRadius));
+            int maxZ = Mathf.Min(TotalVoxelsZ - 1, Mathf.CeilToInt(localPos.z + brushRadius));
 
             HashSet<Vector3Int> dirtyChunks = new HashSet<Vector3Int>();
 
@@ -604,11 +626,11 @@ namespace vilemmakovicka.wvbterrain {
             Vector3 localPos = transform.InverseTransformPoint(worldPoint) / voxelScale;
 
             int minX = Mathf.Max(1, Mathf.FloorToInt(localPos.x - brushRadius));
-            int maxX = Mathf.Min(totalVoxelsX - 2, Mathf.CeilToInt(localPos.x + brushRadius));
+            int maxX = Mathf.Min(TotalVoxelsX - 2, Mathf.CeilToInt(localPos.x + brushRadius));
             int minY = Mathf.Max(1, Mathf.FloorToInt(localPos.y - brushRadius));
-            int maxY = Mathf.Min(totalVoxelsY - 2, Mathf.CeilToInt(localPos.y + brushRadius));
+            int maxY = Mathf.Min(TotalVoxelsY - 2, Mathf.CeilToInt(localPos.y + brushRadius));
             int minZ = Mathf.Max(1, Mathf.FloorToInt(localPos.z - brushRadius));
-            int maxZ = Mathf.Min(totalVoxelsZ - 2, Mathf.CeilToInt(localPos.z + brushRadius));
+            int maxZ = Mathf.Min(TotalVoxelsZ - 2, Mathf.CeilToInt(localPos.z + brushRadius));
 
             int sizeXRange = maxX - minX + 1;
             int sizeYRange = maxY - minY + 1;

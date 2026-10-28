@@ -1,6 +1,9 @@
 
 namespace vilemmakovicka.wvbterrain
 {
+    /// <summary>
+    /// Storage for all tables required for marching cubes.
+    /// </summary>
     public static class MarchingTable {
         public static readonly int[] EdgeTable = new int[256] {
             0x0, 0x109, 0x203, 0x30a, 0x80c, 0x905, 0xa0f, 0xb06,

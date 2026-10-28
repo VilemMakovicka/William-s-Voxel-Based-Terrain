@@ -1,7 +1,7 @@
 {
   "name": "com.vilemmakovicka.wvbterrain",
   "displayName": "William's Voxel-Based Terrain",
-  "version": "0.0.1",
+  "version": "0.2.0",
   "unity": "2021.3",
   "description": "Voxel-based terrain that allows overhangs, caves and other features that are missing from the Unity's default terrain system.",
   "keywords": [

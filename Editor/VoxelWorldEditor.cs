@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
+using System.Linq;
 
 namespace vilemmakovicka.wvbterrain {
     [CustomEditor(typeof(VoxelWorld))]
@@ -24,17 +25,40 @@ namespace vilemmakovicka.wvbterrain {
         private Material[] compatibleMaterials = new Material[0];
 
         private SerializedObject transformSerializedObject;
-        private SerializedProperty localPositionProp;
+        private SerializedProperty localPositionProperty;
 
-        private SerializedProperty chunksXProp;
-        private SerializedProperty chunksYProp;
-        private SerializedProperty chunksZProp;
-        private SerializedProperty voxelScaleProp;
+        private SerializedProperty chunksXProperty;
+        private SerializedProperty chunksYProperty;
+        private SerializedProperty chunksZProperty;
+        private SerializedProperty voxelScaleProperty;
 
+        private bool visualizeChunks = false;
+
+        /*material preview*/
+        private PreviewRenderUtility _previewUtility;
+        private float _spinAngle;
+        private double _lastTime;
+        private Mesh _fallbackSphereMesh;
+        private Mesh previewMesh;
 
         private void OnEnable() {
             world = (VoxelWorld)target;
             isDirty = false;
+
+            /**/
+            string assetPath = "Packages/com.vilemmakovicka.wvbterrain/Runtime/Defaults/wvbt_terrainPreview.fbx";
+            Object[] subAssets = AssetDatabase.LoadAllAssetsAtPath(assetPath);
+            previewMesh = subAssets.OfType<Mesh>().FirstOrDefault() ?? _fallbackSphereMesh;
+
+            _previewUtility = new PreviewRenderUtility();
+            _previewUtility.cameraFieldOfView = 30f;
+
+            GameObject primitive = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            _fallbackSphereMesh = primitive.GetComponent<MeshFilter>().sharedMesh;
+            DestroyImmediate(primitive);
+
+            _lastTime = EditorApplication.timeSinceStartup;
+            /**/
 
             materialProp = serializedObject.FindProperty("terrainMaterial")
                         ?? serializedObject.FindProperty("material")
@@ -44,13 +68,13 @@ namespace vilemmakovicka.wvbterrain {
 
             if (world != null && world.transform != null) {
                 transformSerializedObject = new SerializedObject(world.transform);
-                localPositionProp = transformSerializedObject.FindProperty("m_LocalPosition");
+                localPositionProperty = transformSerializedObject.FindProperty("m_LocalPosition");
             }
 
-            chunksXProp = serializedObject.FindProperty("chunksX");
-            chunksYProp = serializedObject.FindProperty("chunksY");
-            chunksZProp = serializedObject.FindProperty("chunksZ");
-            voxelScaleProp = serializedObject.FindProperty("voxelScale");
+            chunksXProperty = serializedObject.FindProperty("chunksX");
+            chunksYProperty = serializedObject.FindProperty("chunksY");
+            chunksZProperty = serializedObject.FindProperty("chunksZ");
+            voxelScaleProperty = serializedObject.FindProperty("voxelScale");
         }
 
         private void OnDisable() {
@@ -59,26 +83,33 @@ namespace vilemmakovicka.wvbterrain {
                 world.SaveToDisk();
                 isDirty = false;
             }
+
+            if (_previewUtility != null) {
+                _previewUtility.Cleanup();
+                _previewUtility = null;
+            }
         }
 
         public override void OnInspectorGUI() {
             serializedObject.Update();
 
+            // Advance spin angle based on actual time elapsed
+            double currentTime = EditorApplication.timeSinceStartup;
+            float deltaTime = (float)(currentTime - _lastTime);
+            _lastTime = currentTime;
+            _spinAngle = (_spinAngle + 45f * deltaTime) % 360f;
+
             // Position
-            if (transformSerializedObject != null && localPositionProp != null) {
+            if (transformSerializedObject != null && localPositionProperty != null) {
                 transformSerializedObject.Update();
 
-                EditorGUILayout.PropertyField(localPositionProp, new GUIContent("Position"));
+                EditorGUILayout.PropertyField(localPositionProperty, new GUIContent("Position"));
 
                 transformSerializedObject.ApplyModifiedProperties();
             }
 
             // Locked mode
             if (world.IsBaked || !world.isEditingMode) {
-                //Material curMat = GetTargetMaterial();
-                //Material assignedMat = (Material)EditorGUILayout.ObjectField("Active Material", curMat, typeof(Material), false);
-                //if (EditorGUI.EndChangeCheck()) { SetTargetMaterial(assignedMat); }
-
                 EditorGUILayout.HelpBox(
                     world.IsBaked
                         ? "Terrain is currently BAKED."
@@ -97,31 +128,40 @@ namespace vilemmakovicka.wvbterrain {
 
             EditorGUILayout.Space(10);
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-            EditorGUILayout.LabelField("Terrain Initialization", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("Terrain generation", EditorStyles.boldLabel);
             EditorGUILayout.Space(5);
             // Size in chunks
+
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.PrefixLabel("Size in chunks");
             EditorGUILayout.LabelField("x", GUILayout.Width(10.0f));
-            EditorGUILayout.PropertyField(chunksXProp, GUIContent.none);
+            EditorGUILayout.PropertyField(chunksXProperty, GUIContent.none);
             EditorGUILayout.LabelField("y", GUILayout.Width(10.0f));
-            EditorGUILayout.PropertyField(chunksYProp, GUIContent.none);
+            EditorGUILayout.PropertyField(chunksYProperty, GUIContent.none);
             EditorGUILayout.LabelField("z", GUILayout.Width(10.0f));
-            EditorGUILayout.PropertyField(chunksZProp, GUIContent.none);
+            EditorGUILayout.PropertyField(chunksZProperty, GUIContent.none);
             EditorGUILayout.EndHorizontal();
 
             // Enforce positive chunk counts
-            chunksXProp.intValue = Mathf.Max(1, chunksXProp.intValue);
-            chunksYProp.intValue = Mathf.Max(1, chunksYProp.intValue);
-            chunksZProp.intValue = Mathf.Max(1, chunksZProp.intValue);
+            chunksXProperty.intValue = Mathf.Max(1, chunksXProperty.intValue);
+            chunksYProperty.intValue = Mathf.Max(1, chunksYProperty.intValue);
+            chunksZProperty.intValue = Mathf.Max(1, chunksZProperty.intValue);
 
             // Voxel size
-            EditorGUILayout.PropertyField(voxelScaleProp, new GUIContent("Voxel Scale"));
-            voxelScaleProp.floatValue = Mathf.Max(0.01f, voxelScaleProp.floatValue);
+            EditorGUILayout.BeginHorizontal();
+
+            EditorGUILayout.PropertyField(voxelScaleProperty, new GUIContent("Voxel Scale"));
+            voxelScaleProperty.floatValue = Mathf.Max(0.01f, voxelScaleProperty.floatValue);
+            visualizeChunks = GUILayout.Toggle(visualizeChunks, "Visualize chunks");
+            if (EditorGUI.EndChangeCheck()) {
+                SceneView.RepaintAll();
+            }
+
+            EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.Space(10);
-            if (GUILayout.Button("Reset terrain")) {
-                if (EditorUtility.DisplayDialog("Reset Terrain?", "This will wipe current terrain density back to flat baseline. Continue?", "Yes", "No")) {
+            if (GUILayout.Button("Generate terrain")) {
+                if (EditorUtility.DisplayDialog("Generate Terrain?", "This will delete the current terrain. Continue?", "Yes", "No")) {
                     world.InitializeWorld(force: true);
                     world.SaveToDisk();
                 }
@@ -140,13 +180,14 @@ namespace vilemmakovicka.wvbterrain {
 
             EditorGUILayout.Space(5);
             brushRadius = EditorGUILayout.Slider("Brush Radius", brushRadius, 1f, 25f);
-            brushStrength = EditorGUILayout.Slider("Brush Strength", brushStrength, 0.01f, 1f);
+            // brushStrength = EditorGUILayout.Slider("Brush Strength", brushStrength, 0.01f, 1f);
+            brushStrength = EditorGUIExtensions.LogSliderWithField("Brush Strength", brushStrength, 0.01f, 1f, power: 3f);
 
             Material currentMat = GetTargetMaterial();
 
             if (activeTool == ToolMode.Paint) {
                 EditorGUILayout.Space(8);
-                EditorGUILayout.LabelField("Visual Paint Layer Palette", EditorStyles.boldLabel);
+                EditorGUILayout.LabelField("Texture selection", EditorStyles.boldLabel);
 
                 // Visual Texture Grid
                 DrawVisualPalette(currentMat);
@@ -170,24 +211,11 @@ namespace vilemmakovicka.wvbterrain {
 
             EditorGUILayout.EndVertical();
 
-            // Storage
-            /*EditorGUILayout.Space(10);
-            EditorGUILayout.LabelField("Persistence & Storage", EditorStyles.boldLabel);
-            
-            EditorGUILayout.BeginHorizontal();
-            if (GUILayout.Button("Save Terrain to Disk")) {
-                world.SaveToDisk();
-            }
-            if (GUILayout.Button("Reload from Disk")) {
-                world.InitializeWorld(force: false);
-            }
-            EditorGUILayout.EndHorizontal();*/
-
             EditorGUILayout.Space(5);
             EditorGUILayout.BeginHorizontal();
 
             GUI.backgroundColor = new Color(0.5f, 0.8f, 1f);
-            if (GUILayout.Button("Bake terrain lightmaps & LODs", GUILayout.Height(28))) {
+            if (GUILayout.Button(new GUIContent("Bake terrain", "Converts terrain into static meshes, generates LODs and prepares lightmap UVs"), GUILayout.Height(28))) {
                 world.LockAndBake();
                 EditorUtility.SetDirty(world);
             }
@@ -230,18 +258,14 @@ namespace vilemmakovicka.wvbterrain {
             EditorGUILayout.Space(5);
             Material currentMat = GetTargetMaterial();
 
-            //EditorGUI.BeginChangeCheck();
-            //Material assignedMat = (Material)EditorGUILayout.ObjectField("Active Material", currentMat, typeof(Material), false);
-            //if (EditorGUI.EndChangeCheck()) {
-            //    SetTargetMaterial(assignedMat);
-            //    RefreshCompatibleMaterials();
-            //    currentMat = assignedMat;
-            //}
-
-
+            EditorGUILayout.BeginHorizontal();
+            if (GUILayout.Button("+", GUILayout.Height(18), GUILayout.Width(18))) {
+                CreateNewMaterial(currentMat);
+                currentMat = GetTargetMaterial();
+            }
             if (currentMat != null && currentMat.shader != null) {
                 if (compatibleMaterials.Length > 0) {
-                    int newIndex = EditorGUILayout.Popup("Current material", selectedMaterialIndex, compatibleMaterialNames);
+                    int newIndex = EditorGUILayout.Popup("", selectedMaterialIndex, compatibleMaterialNames);
                     if (newIndex != selectedMaterialIndex && newIndex >= 0 && newIndex < compatibleMaterials.Length) {
                         selectedMaterialIndex = newIndex;
                         SetTargetMaterial(compatibleMaterials[newIndex]);
@@ -251,23 +275,49 @@ namespace vilemmakovicka.wvbterrain {
                 else {
                     EditorGUILayout.HelpBox("No other materials in the project share this shader.", MessageType.None);
                 }
-
-                //EditorGUILayout.Space(6);
-                //DrawInlineTextureSlots(currentMat);
             }
             else {
                 EditorGUILayout.HelpBox("Assign or create a material to view texture slots and shader options.", MessageType.Warning);
             }
 
-            EditorGUILayout.BeginHorizontal();
-            if (GUILayout.Button("Create New Material", GUILayout.Height(22))) {
-                CreateNewMaterial(currentMat);
-                currentMat = GetTargetMaterial();
-            }
-            if (GUILayout.Button("Refresh List", GUILayout.Width(120), GUILayout.Height(22))) {
+            /*if (GUILayout.Button("Refresh List", GUILayout.Width(120), GUILayout.Height(22))) {
                 RefreshCompatibleMaterials();
+            }*/
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUI.BeginChangeCheck();
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.BeginHorizontal();
+            // Texture Fields
+            Texture currentTexR = currentMat.GetTexture("_TexRock");
+            Texture newTexR = (Texture)EditorGUILayout.ObjectField("", currentTexR, typeof(Texture), false, GUILayout.Width(60));
+            Texture currentTexG = currentMat.GetTexture("_TexGrass");
+            Texture newTexG = (Texture)EditorGUILayout.ObjectField("", currentTexG, typeof(Texture), false, GUILayout.Width(60));
+            Texture currentTexB = currentMat.GetTexture("_TexDirt");
+            Texture newTexB = (Texture)EditorGUILayout.ObjectField("", currentTexB, typeof(Texture), false, GUILayout.Width(60));
+            Texture currentTexA = currentMat.GetTexture("_TexPath");
+            Texture newTexA = (Texture)EditorGUILayout.ObjectField("", currentTexA, typeof(Texture), false, GUILayout.Width(60));
+            EditorGUILayout.EndHorizontal();
+
+            Rect viewportRect = GUILayoutUtility.GetRect(200, 200, GUILayout.Width(200), GUILayout.Height(200));
+            GUI.Box(viewportRect, GUIContent.none, EditorStyles.textArea);
+            if (Event.current.type == EventType.Repaint) {
+                DrawRotatingPreview(viewportRect, previewMesh, currentMat);
             }
             EditorGUILayout.EndHorizontal();
+
+            // Apply changes
+            if (EditorGUI.EndChangeCheck()) {
+                Undo.RecordObject(currentMat, "Modify Material Properties");
+
+                if (newTexR != currentTexR) currentMat.SetTexture("_TexRock", newTexR);
+                if (newTexR != currentTexG) currentMat.SetTexture("_TexGrass", newTexG);
+                if (newTexR != currentTexB) currentMat.SetTexture("_TexDirt", newTexB);
+                if (newTexR != currentTexA) currentMat.SetTexture("_TexPath", newTexA);
+
+                EditorUtility.SetDirty(currentMat);
+                SceneView.RepaintAll(); // Updates scene immediately
+            }
 
             EditorGUILayout.EndVertical();
         }
@@ -418,80 +468,104 @@ namespace vilemmakovicka.wvbterrain {
         }
 
         private Color GetTargetColor(int layerIndex) {
-            switch (layerIndex) {
-                case 0: return new Color(1f, 0f, 0f, 0f); // (R)
-                case 1: return new Color(0f, 1f, 0f, 0f); // (G)
-                case 2: return new Color(0f, 0f, 1f, 0f); // (B)
-                case 3: return new Color(0f, 0f, 0f, 1f); // (A)
-                default: return new Color(1f, 0f, 0f, 0f);
-            }
+            return layerIndex switch {
+                0 => new Color(1f, 0f, 0f, 0f), // (R)
+                1 => new Color(0f, 1f, 0f, 0f), // (G)
+                2 => new Color(0f, 0f, 1f, 0f), // (B)
+                3 => new Color(0f, 0f, 0f, 1f), // (A)
+                _ => new Color(1f, 0f, 0f, 0f),
+            };
         }
 
         #endregion
 
         #region Scene Painting & Sculpting
-
+        /// <summary>
+        /// Terrain tool gizmos & tool usage
+        /// </summary>
         private void OnSceneGUI() {
-            Event e = Event.current;
+            Event evnt = Event.current;
 
             SceneView sceneView = SceneView.currentDrawingSceneView;
             if (sceneView != null) {
                 sceneView.wantsMouseMove = true;
-                if (e.type == EventType.MouseMove)
+                if (evnt.type == EventType.MouseMove) {
                     sceneView.Repaint();
+                }
             }
 
             if (!world.isEditingMode) { return; }
 
-            Ray ray = HandleUtility.GUIPointToWorldRay(e.mousePosition);
+            // Chunk visualization
+            if (visualizeChunks) {
+                for(int x = 0; x < world.chunksX; x++) 
+                    for (int y = 0; y < world.chunksY; y++) 
+                        for (int z = 0; z < world.chunksZ; z++) {
+                            Vector3 chunkSize = VoxelWorld.ChunkSizeV3;
+                            Vector3 centerOffset = chunkSize / 2;
+                            Vector3 cubePosition = new Vector3(x * chunkSize.x, y * chunkSize.y, z * chunkSize.z);
+                            Handles.DrawWireCube(world.transform.position + cubePosition + centerOffset, chunkSize);
+                        }
+            }
+
+            // Mouse raycast
+            Ray ray = HandleUtility.GUIPointToWorldRay(evnt.mousePosition);
 
             if (Physics.Raycast(ray, out RaycastHit hit)) {
-                if (hit.collider.transform.IsChildOf(world.transform)) {
-                    if (activeTool == ToolMode.Paint)
-                        Handles.color = Color.magenta;
-                    else if (e.control)
-                        Handles.color = Color.cyan;
-                    else if (e.shift)
-                        Handles.color = Color.red;
-                    else
-                        Handles.color = Color.green;
+                var hitTransform = hit.collider.transform;
+                if (hitTransform.IsChildOf(world.transform)) {
+                    // Set handles color based on the tool used
+                    Handles.color = activeTool switch {
+                        ToolMode.Paint                    => Color.magenta, // Texture Paint mode
+                        ToolMode.Sculpt when evnt.control => Color.cyan,    // Smooth mode
+                        ToolMode.Sculpt when evnt.shift   => Color.red,     // Dig mode
+                        _                                 => Color.green,   // Add mode
+                    };
 
+                    // Draw brush visualization
                     Handles.DrawWireDisc(hit.point, hit.normal, brushRadius * world.voxelScale);
                     Handles.ArrowHandleCap(
-                        0,
+                        controlID: 0,
                         hit.point,
                         Quaternion.LookRotation(hit.normal),
-                        1f,
+                        size: brushRadius * world.voxelScale * brushStrength,
                         EventType.Repaint
                     );
 
+
                     HandleUtility.AddDefaultControl(GUIUtility.GetControlID(FocusType.Passive));
 
-                    if (e.type == EventType.MouseDown || e.type == EventType.MouseDrag) {
-                        if (e.button == 0) {
-                            if (activeTool == ToolMode.Paint) {
-                                world.Paint(hit.point, brushRadius, brushStrength, GetTargetColor(selectedLayerIndex));
-                            }
-                            else {
-                                if (e.control)
-                                    world.Smooth(hit.point, brushRadius, brushStrength);
-                                else
-                                    world.Sculpt(hit.point, brushRadius, brushStrength * (e.shift ? -1f : 1f));
-                            }
-                            isDirty = true;
-                            e.Use();
+                    bool usingLMB = evnt.button == 0;
+                    bool isClickingOrDragging = evnt.type == EventType.MouseDown || evnt.type == EventType.MouseDrag;
+
+                    // Use selected tools
+                    if (usingLMB && isClickingOrDragging) {
+                        if (activeTool == ToolMode.Paint) {
+                            world.Paint(hit.point, brushRadius, brushStrength, GetTargetColor(selectedLayerIndex));
                         }
+                        else if (activeTool == ToolMode.Sculpt) {
+                            if      (evnt.control) world.Smooth(hit.point, brushRadius, brushStrength); // Smooth
+                            else if (evnt.shift)   world.Sculpt(hit.point, brushRadius,-brushStrength); // Dig
+                            else                   world.Sculpt(hit.point, brushRadius, brushStrength); // Add
+                        }
+
+                        isDirty = true;
+                        evnt.Use();
                     }
                 }
             }
         }
-
         #endregion
 
+        /// <summary>
+        /// When the sceen is saved, save all voxel terrains too.
+        /// </summary>
         public class VoxelTerrainAutoSaver : AssetModificationProcessor {
+            /// <summary>
+            /// When the sceen is saved, save all voxel terrains too.
+            /// </summary>
             private static string[] OnWillSaveAssets(string[] paths) {
-                // When scene is saved, auto-write all voxel worlds to their .bytes files
-                VoxelWorld[] worlds = Object.FindObjectsOfType<VoxelWorld>();
+                VoxelWorld[] worlds = FindObjectsOfType<VoxelWorld>();
                 foreach (var w in worlds) {
                     if (w != null) {
                         w.SaveToDisk();
@@ -499,6 +573,32 @@ namespace vilemmakovicka.wvbterrain {
                 }
                 return paths;
             }
+        }
+
+        void DrawRotatingPreview(Rect rect, Mesh mesh, Material mat) {
+            _previewUtility.BeginPreview(rect, GUIStyle.none);
+
+            // Setup camera
+            _previewUtility.camera.transform.position = Quaternion.Euler(20, _spinAngle, 0f) * (Vector3.back * 6f);
+            _previewUtility.camera.transform.rotation = Quaternion.Euler(20, _spinAngle, 0f);
+            _previewUtility.camera.nearClipPlane = 0.01f;
+            _previewUtility.camera.farClipPlane = 100f;
+
+            // Setup dual lighting for depth
+            _previewUtility.lights[0].intensity = 1.3f;
+            _previewUtility.lights[0].transform.rotation = Quaternion.Euler(35f, 45f, 0f);
+            _previewUtility.lights[1].intensity = 0.5f;
+            _previewUtility.lights[1].transform.rotation = Quaternion.Euler(-25f, -135f, 0f);
+
+            // Spin model
+            Quaternion rotation = Quaternion.Euler(-90, 0, 0f);
+            Matrix4x4 trs = Matrix4x4.TRS(Vector3.zero, rotation, Vector3.one * 100);
+
+            _previewUtility.DrawMesh(mesh, trs, mat, 0);
+            _previewUtility.camera.Render();
+
+            Texture resultTex = _previewUtility.EndPreview();
+            GUI.DrawTexture(rect, resultTex, ScaleMode.StretchToFill, false);
         }
     } 
 }

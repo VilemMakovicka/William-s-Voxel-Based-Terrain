@@ -1,7 +1,7 @@
 # William's Voxel Based Terrain
 Voxel-based terrain tool for unity made using Marching Cubes.
 
-![screenshot_1.png](Runtime/Defaults/screenshot_1.png)
+![screenshot_1.png](Runtime/Defaults/screenshot_1.webp)
 
 ### Installation
 

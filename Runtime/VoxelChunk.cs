@@ -6,6 +6,9 @@ using UnityEditor;
 #endif
 
 namespace vilemmakovicka.wvbterrain {
+    /// <summary>
+    /// Component that handles one chunk of the terrain
+    /// </summary>
     [RequireComponent(typeof(MeshFilter), typeof(MeshRenderer), typeof(MeshCollider))]
     public class VoxelChunk : MonoBehaviour {
         private MeshFilter meshFilter;
@@ -29,32 +32,33 @@ namespace vilemmakovicka.wvbterrain {
                 return;
             }
 
-            if (vertices.Length > 65000)
+            if (vertices.Length > 65000) {
                 targetMesh.indexFormat = IndexFormat.UInt32;
-
-            Vector3[] pos = new Vector3[vertices.Length];
-            Vector3[] norms = new Vector3[vertices.Length];
-            Color[] colors = new Color[vertices.Length];
-
-            for (int i = 0; i < vertices.Length; i++) {
-                pos[i] = vertices[i].position;
-                norms[i] = vertices[i].normal;
-                colors[i] = new Color(vertices[i].color.x, vertices[i].color.y, vertices[i].color.z, vertices[i].color.w);
             }
 
-            targetMesh.vertices = pos;
-            targetMesh.normals = norms;
-            targetMesh.colors = colors;
+            Vector3[] vertexPositions = new Vector3[vertices.Length];
+            Vector3[] vertexNormals = new Vector3[vertices.Length];
+            Color[]   vertexColors = new Color[vertices.Length];
+
+            for (int i = 0; i < vertices.Length; i++) {
+                vertexPositions[i] = vertices[i].position;
+                vertexNormals[i] = vertices[i].normal;
+                vertexColors[i] = new Color(vertices[i].color.x, vertices[i].color.y, vertices[i].color.z, vertices[i].color.w);
+            }
+
+            targetMesh.vertices = vertexPositions;
+            targetMesh.normals = vertexNormals;
+            targetMesh.colors = vertexColors;
             targetMesh.triangles = indices;
+
             targetMesh.RecalculateBounds();
 
 #if UNITY_EDITOR
-            if (generateLightmapUVs) {
-                UnwrapParam unwrapSettings;
-                UnwrapParam.SetDefaults(out unwrapSettings);
+            if (generateLightmapUVs) { // Unwarp lightmap UVs
+                UnwrapParam.SetDefaults(out UnwrapParam unwrapSettings);
                 unwrapSettings.packMargin = 0.04f;
                 unwrapSettings.angleError = 8.0f;
-                unwrapSettings.areaError = 15.0f;
+                unwrapSettings.areaError  = 15.0f;
                 Unwrapping.GenerateSecondaryUVSet(targetMesh, unwrapSettings);
             }
 #endif
@@ -93,32 +97,32 @@ namespace vilemmakovicka.wvbterrain {
         }
 
         /// <summary>
-        /// Configures Unity's native LODGroup across LOD0, LOD1, and LOD2 child meshes.
+        /// Updates LOD group's meshes and material
         /// </summary>
-        public void SetupLODGroup(Mesh lod0, Mesh lod1, Mesh lod2, Material mat) {
+        public void SetupLODGroup(Mesh lod0mesh, Mesh lod1mesh, Mesh lod2mesh, Material material) {
             if (lodGroup == null) lodGroup = gameObject.GetComponent<LODGroup>();
             if (lodGroup == null) lodGroup = gameObject.AddComponent<LODGroup>();
 
             // Create or configure LOD children
-            MeshRenderer r0 = GetOrCreateLODChild("LOD0", lod0, mat);
-            MeshRenderer r1 = GetOrCreateLODChild("LOD1", lod1, mat);
-            MeshRenderer r2 = GetOrCreateLODChild("LOD2", lod2, mat);
+            MeshRenderer lod0 = GetOrCreateLODChild("LOD0", lod0mesh, material);
+            MeshRenderer lod1 = GetOrCreateLODChild("LOD1", lod1mesh, material);
+            MeshRenderer lod2 = GetOrCreateLODChild("LOD2", lod2mesh, material);
 
             // Turn off base renderer since children handle display
             GetComponent<MeshRenderer>().enabled = false;
 
             LOD[] lods = new LOD[3];
-            lods[0] = new LOD(0.50f, new Renderer[] { r0 }); // Transitions to LOD1 at 50% screen height
-            lods[1] = new LOD(0.20f, new Renderer[] { r1 }); // Transitions to LOD2 at 20% screen height
-            lods[2] = new LOD(0.04f, new Renderer[] { r2 }); // Culled below 4% screen height
+            lods[0] = new LOD(0.50f, new Renderer[] { lod0 }); // Transitions to LOD1 at 50% screen height
+            lods[1] = new LOD(0.20f, new Renderer[] { lod1 }); // Transitions to LOD2 at 20% screen height
+            lods[2] = new LOD(0.04f, new Renderer[] { lod2 }); // Culled below 4% screen height
 
             lodGroup.SetLODs(lods);
             lodGroup.RecalculateBounds();
         }
 
-        private MeshRenderer GetOrCreateLODChild(string childName, Mesh m, Material mat) {
-            Transform child = transform.Find(childName);
-            if (child == null) {
+        private MeshRenderer GetOrCreateLODChild(string childName, Mesh mesh, Material material) {
+            Transform child = transform.Find(childName); //Get child
+            if (child == null) { //If child doesn't exist, create it.
                 GameObject go = new GameObject(childName);
                 go.transform.parent = transform;
                 go.transform.localPosition = Vector3.zero;
@@ -127,36 +131,42 @@ namespace vilemmakovicka.wvbterrain {
                 child = go.transform;
             }
 
-            // Explicit check using Unity's overloaded == operator
-            MeshFilter mf = child.GetComponent<MeshFilter>();
-            if (mf == null) {
-                mf = child.gameObject.AddComponent<MeshFilter>();
+            //Get or create MeshFilter for this child
+            MeshFilter childMeshFilter = child.GetComponent<MeshFilter>();
+            if (childMeshFilter == null) {
+                childMeshFilter = child.gameObject.AddComponent<MeshFilter>();
             }
 
-            MeshRenderer mr = child.GetComponent<MeshRenderer>();
-            if (mr == null) {
-                mr = child.gameObject.AddComponent<MeshRenderer>();
+            //Get or create MeshRenderer for this child
+            MeshRenderer childMeshRenderer = child.GetComponent<MeshRenderer>();
+            if (childMeshRenderer == null) {
+                childMeshRenderer = child.gameObject.AddComponent<MeshRenderer>();
             }
 
-            mf.sharedMesh = m;
-            mr.sharedMaterial = mat;
+            //Assign values for this LOD
+            childMeshFilter.sharedMesh = mesh;
+            childMeshRenderer.sharedMaterial = material;
 
 #if UNITY_EDITOR
             // Ensure child renderers are marked static for lightmapping
-            UnityEditor.GameObjectUtility.SetStaticEditorFlags(child.gameObject, UnityEditor.StaticEditorFlags.ContributeGI);
+            GameObjectUtility.SetStaticEditorFlags(child.gameObject, StaticEditorFlags.ContributeGI);
 
-            // Optimize lightmap resolution across LOD steps
-            SerializedObject so = new SerializedObject(mr);
-            SerializedProperty scaleProp = so.FindProperty("m_ScaleInLightmap");
-            if (scaleProp != null) {
-                if (childName == "LOD0") scaleProp.floatValue = 1.0f;
-                else if (childName == "LOD1") scaleProp.floatValue = 0.5f;
-                else if (childName == "LOD2") scaleProp.floatValue = 0.25f;
-                so.ApplyModifiedProperties();
+            // Lightmap optimization
+            var childMeshRendererSerialized = new SerializedObject(childMeshRenderer);
+            var scaleInLightmap = childMeshRendererSerialized.FindProperty("m_ScaleInLightmap");
+
+            // If the child object exists, change it's scale in lightmaps based on its LOD level
+            if (scaleInLightmap != null) {
+                scaleInLightmap.floatValue = childName switch {
+                    "LOD0" => 1.0f,
+                    "LOD1" => 0.5f,
+                    "LOD2" => 0.25f,
+                    _ => 1.0f
+                };
+                childMeshRendererSerialized.ApplyModifiedProperties();
             }
 #endif
-
-            return mr;
+            return childMeshRenderer;
         }
     } 
 }
