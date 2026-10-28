@@ -11,6 +11,9 @@ Voxel-based terrain tool for unity made using Marching Cubes.
 > [ Note ]
 > This package was made in and for Unity 2021.3.14f1 and I do not know the stability of this package in either later or older versions. 
 
+> [ Note ]
+> Current shaders were made for URP.
+
 1. Open your unity project's package manager
 2. Click the *plus* icon in the top left corner of the package manager
 3. Click "Add a package from git URL"
