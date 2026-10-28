@@ -19,7 +19,7 @@ namespace vilemmakovicka.wvbterrain {
     [ExecuteAlways]
     [SelectionBase]
     public class VoxelWorld : MonoBehaviour {
-        
+
         public int chunksX = 4;
         public int chunksY = 2;
         public int chunksZ = 4;
@@ -39,6 +39,9 @@ namespace vilemmakovicka.wvbterrain {
 
         public Material terrainMaterial;
 
+        public float lod1TriangleRatio = 0.5f;
+        public float lod2TriangleRatio = 0.2f;
+
         private readonly Dictionary<Vector3Int, VoxelChunk> chunks = new Dictionary<Vector3Int, VoxelChunk>();
         private float[,,] worldDensity;
         private Color[,,] worldColors;
@@ -50,7 +53,7 @@ namespace vilemmakovicka.wvbterrain {
         private NativeArray<int> nativeTriTable;
         private NativeArray<int> nativeEdgeTable;
         private NativeArray<int2> nativeEdgeCorners;
-        
+
         [SerializeField] private int uniqueTerrainID = 0;
         public TextAsset terrainDataAsset;
 
@@ -86,14 +89,14 @@ namespace vilemmakovicka.wvbterrain {
                 Vector3Int coord = pair.Key;
                 VoxelChunk chunk = pair.Value;
 
-                // Generate all 3 LODs in Burst
-                // Render LODs get skirts to hide cracks between chunks at different LODs
-                Mesh m0 = GenerateChunkMesh(coord, stride: 1, generateLightmapUVs: true, emitSkirts: true);
-                Mesh m1 = GenerateChunkMesh(coord, stride: 2, generateLightmapUVs: true, emitSkirts: true);
-                Mesh m2 = GenerateChunkMesh(coord, stride: 4, generateLightmapUVs: true, emitSkirts: true);
+                // LOD0 is the full marching cubes mesh, LOD1/LOD2 are decimated versions of it that keep every
+                // vertex on the chunk border, so all LOD combinations of neighbouring chunks line up (no skirts needed).
+                Mesh m0 = GenerateChunkMesh(coord, 1f, generateLightmapUVs: true);
+                Mesh m1 = GenerateChunkMesh(coord, lod1TriangleRatio, generateLightmapUVs: true);
+                Mesh m2 = GenerateChunkMesh(coord, lod2TriangleRatio, generateLightmapUVs: true);
 
-                // Collider mesh: LOD0 WITHOUT skirts, so no stray collision geometry inside the rock
-                Mesh mCol = GenerateChunkMesh(coord, stride: 1, generateLightmapUVs: false, emitSkirts: false);
+                // Collider mesh: LOD0 without lightmap UVs
+                Mesh mCol = GenerateChunkMesh(coord, 1f, generateLightmapUVs: false);
 
                 // Save .asset files
                 SaveMeshAsset($"{folderPath}/{chunk.name}_LOD0.asset", m0);
@@ -159,7 +162,7 @@ namespace vilemmakovicka.wvbterrain {
 
             // Save all voxel's densities
             for (int x = 0; x < totalX; x++) {
-                for (int y = 0; y < totalY; y++) { 
+                for (int y = 0; y < totalY; y++) {
                     for (int z = 0; z < totalZ; z++) {
                         writer.Write(worldDensity[x, y, z]);
                     }
@@ -713,9 +716,12 @@ namespace vilemmakovicka.wvbterrain {
         }
 
         /// <summary>
-        /// Generates a mesh for a specific chunk at a specified stride (1 = LOD0, 2 = LOD1, 4 = LOD2).
+        /// Generates the mesh of one chunk.
+        /// triangleRatio = 1 gives the full resolution (LOD0) mesh. Lower values decimate that mesh, but every vertex on
+        /// the border of the chunk (where the surface leaves the chunk) is kept exactly as in LOD0. Because of that a
+        /// chunk at any LOD joins a neighbour at any other LOD without cracks.
         /// </summary>
-        public Mesh GenerateChunkMesh(Vector3Int coord, int stride, bool generateLightmapUVs = false, bool emitSkirts = false) {
+        public Mesh GenerateChunkMesh(Vector3Int coord, float triangleRatio = 1f, bool generateLightmapUVs = false) {
             InitializeNativeTables();
 
             int paddedSx = ChunkSize.x + 3;
@@ -743,11 +749,7 @@ namespace vilemmakovicka.wvbterrain {
 
             MarchingCubesJob job = new MarchingCubesJob {
                 chunkSize = ChunkSize,
-                voxelScale = voxelScale,
                 isoLevel = isoLevel,
-                lodStride = stride, // Pass the stride to Burst!
-                emitSkirts = emitSkirts,
-                maxLodStride = 4,
                 densities = chunkDensities,
                 colors = chunkColors,
                 triTable = nativeTriTable,
@@ -759,24 +761,39 @@ namespace vilemmakovicka.wvbterrain {
 
             job.Schedule().Complete();
 
+            // Vertices are in voxel units here; the border vertices are identical for every LOD
+            TerrainVertex[] meshVerts = verts.AsArray().ToArray();
+            int[] meshIndices = inds.AsArray().ToArray();
+
+            chunkDensities.Dispose();
+            chunkColors.Dispose();
+            verts.Dispose();
+            inds.Dispose();
+
+            if (triangleRatio < 0.999f && meshIndices.Length > 0) {
+                MeshDecimator.Decimate(meshVerts, meshIndices, triangleRatio, out TerrainVertex[] decimatedVerts, out int[] decimatedIndices);
+                meshVerts = decimatedVerts;
+                meshIndices = decimatedIndices;
+            }
+
             Mesh m = new Mesh();
-            if (verts.Length > 0) {
-                if (verts.Length > 65000) m.indexFormat = IndexFormat.UInt32;
+            if (meshVerts.Length > 0) {
+                if (meshVerts.Length > 65000) m.indexFormat = IndexFormat.UInt32;
 
-                Vector3[] pos = new Vector3[verts.Length];
-                Vector3[] norms = new Vector3[verts.Length];
-                Color[] colors = new Color[verts.Length];
+                Vector3[] pos = new Vector3[meshVerts.Length];
+                Vector3[] norms = new Vector3[meshVerts.Length];
+                Color[] colors = new Color[meshVerts.Length];
 
-                for (int i = 0; i < verts.Length; i++) {
-                    pos[i] = verts[i].position;
-                    norms[i] = verts[i].normal;
-                    colors[i] = new Color(verts[i].color.x, verts[i].color.y, verts[i].color.z, verts[i].color.w);
+                for (int i = 0; i < meshVerts.Length; i++) {
+                    pos[i] = meshVerts[i].position * voxelScale;
+                    norms[i] = meshVerts[i].normal;
+                    colors[i] = new Color(meshVerts[i].color.x, meshVerts[i].color.y, meshVerts[i].color.z, meshVerts[i].color.w);
                 }
 
                 m.vertices = pos;
                 m.normals = norms;
                 m.colors = colors;
-                m.triangles = inds.AsArray().ToArray();
+                m.triangles = meshIndices;
                 m.RecalculateBounds();
 
 #if UNITY_EDITOR
@@ -791,16 +808,11 @@ namespace vilemmakovicka.wvbterrain {
 #endif
             }
 
-            chunkDensities.Dispose();
-            chunkColors.Dispose();
-            verts.Dispose();
-            inds.Dispose();
-
             return m;
         }
 
         public void RebuildChunk(Vector3Int coord, bool generateLightmapUVs = false) {
-            Mesh m = GenerateChunkMesh(coord, stride: 1, generateLightmapUVs: generateLightmapUVs);
+            Mesh m = GenerateChunkMesh(coord, 1f, generateLightmapUVs);
 
             TerrainVertex[] verts = new TerrainVertex[m.vertexCount];
             Vector3[] pos = m.vertices;
@@ -825,5 +837,5 @@ namespace vilemmakovicka.wvbterrain {
                 RebuildChunk(pair.Key, generateLightmapUVs: hasBakedLightmapUVs);
             }
         }
-    } 
+    }
 }

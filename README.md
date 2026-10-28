@@ -1,7 +1,9 @@
 # William's Voxel Based Terrain
-Voxel-based terrain tool for unity made using Marching Cubes.
+Terrain tool that allows overhangs, caves and other features that are missing from the Unity's default terrain system.
+> [ Note ]
+> AI has helped a lot with the marching cubes related code and mesh generation.
 
-![screenshot_1.png](Runtime/Defaults/screenshot_1.webp)
+![screenshot_1.webp](Runtime/Defaults/screenshot_1.webp)
 
 ### Installation
 

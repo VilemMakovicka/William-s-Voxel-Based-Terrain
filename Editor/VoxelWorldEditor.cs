@@ -159,6 +159,11 @@ namespace vilemmakovicka.wvbterrain {
 
             EditorGUILayout.EndHorizontal();
 
+            EditorGUILayout.Space(5);
+            EditorGUILayout.LabelField("LOD (used when baking)", EditorStyles.miniBoldLabel);
+            EditorGUILayout.Slider(serializedObject.FindProperty("lod1TriangleRatio"), 0.05f, 1f, "LOD1 triangle ratio");
+            EditorGUILayout.Slider(serializedObject.FindProperty("lod2TriangleRatio"), 0.02f, 1f, "LOD2 triangle ratio");
+
             EditorGUILayout.Space(10);
             if (GUILayout.Button("Generate terrain")) {
                 if (EditorUtility.DisplayDialog("Generate Terrain?", "This will delete the current terrain. Continue?", "Yes", "No")) {
@@ -498,8 +503,8 @@ namespace vilemmakovicka.wvbterrain {
 
             // Chunk visualization
             if (visualizeChunks) {
-                for(int x = 0; x < world.chunksX; x++) 
-                    for (int y = 0; y < world.chunksY; y++) 
+                for (int x = 0; x < world.chunksX; x++)
+                    for (int y = 0; y < world.chunksY; y++)
                         for (int z = 0; z < world.chunksZ; z++) {
                             Vector3 chunkSize = VoxelWorld.ChunkSizeV3;
                             Vector3 centerOffset = chunkSize / 2;
@@ -516,10 +521,10 @@ namespace vilemmakovicka.wvbterrain {
                 if (hitTransform.IsChildOf(world.transform)) {
                     // Set handles color based on the tool used
                     Handles.color = activeTool switch {
-                        ToolMode.Paint                    => Color.magenta, // Texture Paint mode
+                        ToolMode.Paint => Color.magenta, // Texture Paint mode
                         ToolMode.Sculpt when evnt.control => Color.cyan,    // Smooth mode
-                        ToolMode.Sculpt when evnt.shift   => Color.red,     // Dig mode
-                        _                                 => Color.green,   // Add mode
+                        ToolMode.Sculpt when evnt.shift => Color.red,     // Dig mode
+                        _ => Color.green,   // Add mode
                     };
 
                     // Draw brush visualization
@@ -544,9 +549,9 @@ namespace vilemmakovicka.wvbterrain {
                             world.Paint(hit.point, brushRadius, brushStrength, GetTargetColor(selectedLayerIndex));
                         }
                         else if (activeTool == ToolMode.Sculpt) {
-                            if      (evnt.control) world.Smooth(hit.point, brushRadius, brushStrength); // Smooth
-                            else if (evnt.shift)   world.Sculpt(hit.point, brushRadius,-brushStrength); // Dig
-                            else                   world.Sculpt(hit.point, brushRadius, brushStrength); // Add
+                            if (evnt.control) world.Smooth(hit.point, brushRadius, brushStrength); // Smooth
+                            else if (evnt.shift) world.Sculpt(hit.point, brushRadius, -brushStrength); // Dig
+                            else world.Sculpt(hit.point, brushRadius, brushStrength); // Add
                         }
 
                         isDirty = true;
@@ -579,16 +584,21 @@ namespace vilemmakovicka.wvbterrain {
             _previewUtility.BeginPreview(rect, GUIStyle.none);
 
             // Setup camera
-            _previewUtility.camera.transform.position = Quaternion.Euler(20, _spinAngle, 0f) * (Vector3.back * 6f);
-            _previewUtility.camera.transform.rotation = Quaternion.Euler(20, _spinAngle, 0f);
+            Quaternion camRot = Quaternion.Euler(20f, _spinAngle, 0f);
+            _previewUtility.camera.transform.position = camRot * (Vector3.back * 6f);
+            _previewUtility.camera.transform.rotation = camRot;
             _previewUtility.camera.nearClipPlane = 0.01f;
             _previewUtility.camera.farClipPlane = 100f;
 
-            // Setup dual lighting for depth
-            _previewUtility.lights[0].intensity = 1.3f;
-            _previewUtility.lights[0].transform.rotation = Quaternion.Euler(35f, 45f, 0f);
-            _previewUtility.lights[1].intensity = 0.5f;
-            _previewUtility.lights[1].transform.rotation = Quaternion.Euler(-25f, -135f, 0f);
+            // 2. Setup Key Light (Parented/oriented relative to camera)
+            Light keyLight = _previewUtility.lights[0];
+            keyLight.enabled = true;
+            keyLight.type = LightType.Directional;
+            keyLight.color = Color.white;
+            keyLight.intensity = 1.5f;
+            keyLight.transform.rotation = camRot * Quaternion.Euler(30f, 45f, 0f);
+
+            _previewUtility.ambientColor = new Color(0.7f, 0.75f, 0.85f);
 
             // Spin model
             Quaternion rotation = Quaternion.Euler(-90, 0, 0f);
@@ -600,5 +610,5 @@ namespace vilemmakovicka.wvbterrain {
             Texture resultTex = _previewUtility.EndPreview();
             GUI.DrawTexture(rect, resultTex, ScaleMode.StretchToFill, false);
         }
-    } 
+    }
 }
