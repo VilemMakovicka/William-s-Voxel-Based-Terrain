@@ -4,6 +4,8 @@ Terrain tool that allows overhangs, caves and other features that are missing fr
 > AI has helped a lot with the marching cubes related code and mesh generation.
 
 ![screenshot_1.webp](Runtime/Defaults/screenshot_1.webp)
+![screenshot_2.webp](Runtime/Defaults/screenshot_2.webp)
+![screenshot_3.webp](Runtime/Defaults/screenshot_3.webp)
 
 ### Installation
 

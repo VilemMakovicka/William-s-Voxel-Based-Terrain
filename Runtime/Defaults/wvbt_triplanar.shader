@@ -11,12 +11,15 @@ Shader "Custom/wvbt_triplanar"
         [Header(Tiling and Blend)]
         _TextureScale("Texture Tiling", Float) = 0.2
         _TriplanarSharpness("Projection Sharpness", Range(1.0, 16.0)) = 4.0
+        _R_RandomizerIntensity("R Randomizer Intensity", Range(0.0, 1.0)) = 0.0
+        _G_RandomizerIntensity("G Randomizer Intensity", Range(0.0, 1.0)) = 0.0
+        _B_RandomizerIntensity("B Randomizer Intensity", Range(0.0, 1.0)) = 0.0
+        _A_RandomizerIntensity("A Randomizer Intensity", Range(0.0, 1.0)) = 0.0
 
         [Header(Wireframe)]
         [Toggle(_SHOWWIREFRAME_ON)] _ShowWireframe("Enable Culled Wireframe", Float) = 0
         _WireframeColor("Wireframe Color", Color) = (0.05, 0.05, 0.05, 0.7)
-            //_WireframeGridSize("Wireframe Grid Spacing", Float) = 1.0
-            _WireframeThickness("Wireframe Thickness", Range(0.01, 0.2)) = 0.04
+        _WireframeThickness("Wireframe Thickness", Range(0.01, 0.2)) = 0.04
     }
 
         SubShader
@@ -83,6 +86,10 @@ Shader "Custom/wvbt_triplanar"
                     float4 _WireframeColor;
                     //float _WireframeGridSize;
                     float _WireframeThickness;
+                    float _R_RandomizerIntensity;
+                    float _G_RandomizerIntensity;
+                    float _B_RandomizerIntensity;
+                    float _A_RandomizerIntensity;
                 CBUFFER_END
 
                 Varyings vert(Attributes input)
@@ -104,28 +111,96 @@ Shader "Custom/wvbt_triplanar"
                     return output;
                 }
 
-                half4 SampleTriplanar(Texture2D tex, SamplerState smp, float3 posWS, float3 weights)
+                float2 Hash22(float2 p)
+                {
+                    p = float2(dot(p, float2(127.1, 311.7)), dot(p, float2(269.5, 183.3)));
+                    return frac(sin(p) * 43758.5453123);
+                }
+
+                // Stochastic sampling on a single 2D plane (e.g. positionWS.xz)
+                float4 SampleStochasticPlane(Texture2D tex, SamplerState smp, float2 uv, float intensity)
+                {
+                    // Fast path: if intensity is 0, do a regular sample
+                    if (intensity <= 0.001)
+                        return tex.Sample(smp, uv);
+
+                    float2x2 gridToSkew = float2x2(1.0, 0.0, -0.57735027, 1.15470054);
+                    float2 skewedCoord = mul(gridToSkew, uv);
+                    float2 baseId = floor(skewedCoord);
+                    float2 f = frac(skewedCoord);
+
+                    float3 blendWeights = (f.x > f.y) ? float3(1.0 - f.x, f.x - f.y, f.y)
+                        : float3(1.0 - f.y, f.y - f.x, f.x);
+
+                    float2 offset1 = (f.x > f.y) ? float2(1, 0) : float2(0, 1);
+                    float2 node0 = baseId;
+                    float2 node1 = baseId + offset1;
+                    float2 node2 = baseId + float2(1, 1);
+
+                    // Compute explicit derivatives to eliminate mipmap artifacts across cells
+                    float2 dx = ddx(uv);
+                    float2 dy = ddy(uv);
+
+                    float4 c0 = tex.SampleGrad(smp, uv + Hash22(node0) * intensity * 16.0, dx, dy);
+                    float4 c1 = tex.SampleGrad(smp, uv + Hash22(node1) * intensity * 16.0, dx, dy);
+                    float4 c2 = tex.SampleGrad(smp, uv + Hash22(node2) * intensity * 16.0, dx, dy);
+
+                    float3 w = pow(blendWeights, 4.0);
+                    w /= (w.x + w.y + w.z + 1e-5);
+
+                    float4 stochastic = c0 * w.x + c1 * w.y + c2 * w.z;
+
+                    // Contrast preservation against variance loss
+                    float3 mean = (c0.rgb + c1.rgb + c2.rgb) * 0.33333;
+                    stochastic.rgb = lerp(mean, stochastic.rgb, intensity);
+
+                    // Blend between standard UV sample and stochastic using user slider
+                    float4 standard = tex.Sample(smp, uv);
+                    return lerp(standard, stochastic, intensity);
+                }
+
+                half4 SampleTriplanar(Texture2D tex, SamplerState smp, float3 posWS, float3 weights, float breakupIntensity, bool breakTopOnly)
                 {
                     float2 uvX = posWS.zy * _TextureScale;
                     float2 uvY = posWS.xz * _TextureScale;
                     float2 uvZ = posWS.xy * _TextureScale;
 
-                    half4 colX = SAMPLE_TEXTURE2D(tex, smp, uvX);
-                    half4 colY = SAMPLE_TEXTURE2D(tex, smp, uvY);
-                    half4 colZ = SAMPLE_TEXTURE2D(tex, smp, uvZ);
+                    /*half4 colX = tex.Sample(smp, uvX);
+                    half4 colZ = tex.Sample(smp, uvZ);
+
+                    half4 colY;
+                    if (breakTopOnly)
+                    {
+                        colY = SampleStochasticPlane(tex, smp, uvY, breakupIntensity);
+                    }
+                    else
+                    {
+                        colY = tex.Sample(smp, uvY);
+                    }*/
+
+                    half4 colX = SampleStochasticPlane(tex, smp, uvX, breakupIntensity);
+                    half4 colZ = SampleStochasticPlane(tex, smp, uvZ, breakupIntensity);
+                    half4 colY = SampleStochasticPlane(tex, smp, uvY, breakupIntensity);
 
                     return colX * weights.x + colY * weights.y + colZ * weights.z;
                 }
+
+
 
                 half4 frag(Varyings input) : SV_Target
                 {
                     float3 blend = pow(abs(input.normalWS), _TriplanarSharpness);
                     blend /= (blend.x + blend.y + blend.z + 1e-4);
 
-                    half3 cRock = SampleTriplanar(_TexRock,  sampler_TexRock,  input.positionWS, blend).rgb;
-                    half3 cGrass = SampleTriplanar(_TexGrass, sampler_TexGrass, input.positionWS, blend).rgb;
-                    half3 cDirt = SampleTriplanar(_TexDirt,  sampler_TexDirt,  input.positionWS, blend).rgb;
-                    half3 cPath = SampleTriplanar(_TexPath,  sampler_TexPath,  input.positionWS, blend).rgb;
+                    //half3 cRock = SampleTriplanar(_TexRock,  sampler_TexRock,  input.positionWS, blend).rgb;
+                    //half3 cGrass = SampleTriplanar(_TexGrass, sampler_TexGrass, input.positionWS, blend).rgb;
+                    //half3 cDirt = SampleTriplanar(_TexDirt,  sampler_TexDirt,  input.positionWS, blend).rgb;
+                    //half3 cPath = SampleTriplanar(_TexPath,  sampler_TexPath,  input.positionWS, blend).rgb;
+
+                    half3 cRock = SampleTriplanar(_TexRock, sampler_TexRock, input.positionWS, blend, _R_RandomizerIntensity, true).rgb;
+                    half3 cGrass = SampleTriplanar(_TexGrass, sampler_TexGrass, input.positionWS, blend, _G_RandomizerIntensity, true).rgb;
+                    half3 cDirt = SampleTriplanar(_TexDirt, sampler_TexDirt, input.positionWS, blend, _B_RandomizerIntensity, true).rgb;
+                    half3 cPath = SampleTriplanar(_TexPath, sampler_TexPath, input.positionWS, blend, _A_RandomizerIntensity, true).rgb;
 
                     float4 splat = saturate(input.color);
 

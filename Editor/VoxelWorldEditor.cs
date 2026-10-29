@@ -34,6 +34,15 @@ namespace vilemmakovicka.wvbterrain {
 
         private bool visualizeChunks = false;
 
+        // Slope coloring settings (channels: 0 = R, 1 = G, 2 = B, 3 = A; transition -1 = none)
+        private static readonly string[] channelNames = { "R", "G", "B", "A" };
+        private static readonly string[] transitionChannelNames = { "None", "R", "G", "B", "A" };
+        private int slopeUpChannel = 0;
+        private int slopeSideChannel = 1;
+        private int slopeTransitionChannel = 2;
+        private float slopeFlatAngle = 25f;
+        private float slopeSteepAngle = 55f;
+
         /*material preview*/
         private PreviewRenderUtility _previewUtility;
         private float _spinAngle;
@@ -159,23 +168,31 @@ namespace vilemmakovicka.wvbterrain {
 
             EditorGUILayout.EndHorizontal();
 
-            EditorGUILayout.Space(5);
-            EditorGUILayout.LabelField("LOD (used when baking)", EditorStyles.miniBoldLabel);
-            EditorGUILayout.Slider(serializedObject.FindProperty("lod1TriangleRatio"), 0.05f, 1f, "LOD1 triangle ratio");
-            EditorGUILayout.Slider(serializedObject.FindProperty("lod2TriangleRatio"), 0.02f, 1f, "LOD2 triangle ratio");
+            //EditorGUILayout.Space(5);
+            //EditorGUILayout.LabelField("LOD (used when baking)", EditorStyles.miniBoldLabel);
+            //EditorGUILayout.Slider(serializedObject.FindProperty("lod1TriangleRatio"), 0.05f, 1f, "LOD1 triangle ratio");
+            //EditorGUILayout.Slider(serializedObject.FindProperty("lod2TriangleRatio"), 0.02f, 1f, "LOD2 triangle ratio");
 
             EditorGUILayout.Space(10);
+            EditorGUILayout.BeginHorizontal();
             if (GUILayout.Button("Generate terrain")) {
                 if (EditorUtility.DisplayDialog("Generate Terrain?", "This will delete the current terrain. Continue?", "Yes", "No")) {
                     world.InitializeWorld(force: true);
                     world.SaveToDisk();
                 }
             }
+            if (GUILayout.Button(new GUIContent("Generate from heightmap", "Pick a PNG/JPG heightmap. It is stretched over the whole terrain: the image over the X/Z size in chunks, black to white over the Y size in chunks."))) {
+                GenerateFromHeightmap();
+            }
+            EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.EndVertical();
 
             EditorGUILayout.Space(10);
             DrawMaterialSection();
+
+            EditorGUILayout.Space(10);
+            DrawSlopeColorSection();
 
             EditorGUILayout.Space(10);
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
@@ -232,6 +249,82 @@ namespace vilemmakovicka.wvbterrain {
             serializedObject.ApplyModifiedProperties();
         }
 
+        /// <summary>
+        /// Lets the user pick a heightmap image (PNG/JPG) and rebuilds the terrain from it.
+        /// The image is read straight from the file, so it does not need to be imported into the project
+        /// or have Read/Write enabled. The red channel is used as the height (works for grayscale images).
+        /// </summary>
+        private void GenerateFromHeightmap() {
+            string path = EditorUtility.OpenFilePanel("Choose heightmap (PNG / JPG)", Application.dataPath, "png,jpg,jpeg");
+            if (string.IsNullOrEmpty(path)) return;
+
+            Texture2D tex = new Texture2D(2, 2, TextureFormat.RGBA32, false, true);
+            try {
+                if (!tex.LoadImage(System.IO.File.ReadAllBytes(path))) {
+                    EditorUtility.DisplayDialog("Heightmap", "Could not read this image. Use a PNG or JPG file.", "OK");
+                    return;
+                }
+
+                int w = tex.width;
+                int h = tex.height;
+
+                string message =
+                    $"This will delete the current terrain and generate it from '{System.IO.Path.GetFileName(path)}' ({w}x{h}).\n\n" +
+                    $"The image will be stretched over {chunksXProperty.intValue} x {chunksZProperty.intValue} chunks, " +
+                    $"and black-to-white over the terrain height of {chunksYProperty.intValue} chunk(s). Continue?";
+
+                if (!EditorUtility.DisplayDialog("Generate From Heightmap?", message, "Yes", "No")) return;
+
+                Color32[] pixels = tex.GetPixels32();
+                float[] heights = new float[pixels.Length];
+                for (int i = 0; i < pixels.Length; i++) {
+                    heights[i] = pixels[i].r / 255f;
+                }
+
+                // Make sure the chunk counts edited in the inspector are applied before the terrain is built
+                serializedObject.ApplyModifiedProperties();
+
+                world.InitializeWorldFromHeightmap(heights, w, h);
+                world.SaveToDisk();
+            }
+            finally {
+                DestroyImmediate(tex);
+            }
+        }
+
+        private void DrawSlopeColorSection() {
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            EditorGUILayout.LabelField("Slope dependent coloring", EditorStyles.boldLabel);
+            EditorGUILayout.Space(5);
+
+            slopeUpChannel = EditorGUILayout.Popup(new GUIContent("Flat surfaces", "Vertex color channel used for surfaces that face upwards."), slopeUpChannel, channelNames);
+            slopeTransitionChannel = EditorGUILayout.Popup(new GUIContent("Slopes", "Vertex color channel used between the flat and the steep parts. Choose None to blend directly between the two other channels."), slopeTransitionChannel + 1, transitionChannelNames) - 1;
+            slopeSideChannel = EditorGUILayout.Popup(new GUIContent("Walls & Ceilings", "Vertex color channel used for steep surfaces."), slopeSideChannel, channelNames);
+
+            slopeFlatAngle = EditorGUILayout.Slider(new GUIContent("Flat up to", "Slope angle in degrees (0 = facing straight up) up to which the surface counts as fully flat."), slopeFlatAngle, 0f, 89f);
+            slopeSteepAngle = EditorGUILayout.Slider(new GUIContent("Steep from", "Slope angle in degrees (90 = vertical wall) from which the surface counts as fully steep."), slopeSteepAngle, 1f, 90f);
+            if (slopeSteepAngle <= slopeFlatAngle) slopeSteepAngle = Mathf.Min(90f, slopeFlatAngle + 1f);
+
+            bool duplicateChannels =
+                slopeUpChannel == slopeSideChannel ||
+                (slopeTransitionChannel >= 0 && (slopeTransitionChannel == slopeUpChannel || slopeTransitionChannel == slopeSideChannel));
+
+            if (duplicateChannels) {
+                EditorGUILayout.HelpBox("Each role needs its own channel.", MessageType.Warning);
+            }
+
+            GUI.enabled = !duplicateChannels;
+            if (GUILayout.Button(new GUIContent("Generate terrain colors", "Recolors the whole terrain based on the direction its surface is facing. This overwrites the painted textures."), GUILayout.Height(24))) {
+                if (EditorUtility.DisplayDialog("Generate terrain colors?", "This overwrites the painted textures of the whole terrain. Continue?", "Yes", "No")) {
+                    world.ApplySlopeColors(slopeUpChannel, slopeSideChannel, slopeTransitionChannel, slopeFlatAngle, slopeSteepAngle);
+                    world.SaveToDisk();
+                }
+            }
+            GUI.enabled = true;
+
+            EditorGUILayout.EndVertical();
+        }
+
         #region Material Management & Texture Slots
 
         private Material GetTargetMaterial() {
@@ -257,6 +350,8 @@ namespace vilemmakovicka.wvbterrain {
             }
         }
 
+        Vector2 textureScrollPosition = Vector2.zero;
+
         private void DrawMaterialSection() {
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
             EditorGUILayout.LabelField("Terrain Material", EditorStyles.boldLabel);
@@ -264,7 +359,8 @@ namespace vilemmakovicka.wvbterrain {
             Material currentMat = GetTargetMaterial();
 
             EditorGUILayout.BeginHorizontal();
-            if (GUILayout.Button("+", GUILayout.Height(18), GUILayout.Width(18))) {
+
+            if (GUILayout.Button("Create new", GUILayout.Height(18), GUILayout.Width(85))) {
                 CreateNewMaterial(currentMat);
                 currentMat = GetTargetMaterial();
             }
@@ -293,16 +389,51 @@ namespace vilemmakovicka.wvbterrain {
             EditorGUI.BeginChangeCheck();
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.BeginHorizontal();
+            textureScrollPosition = EditorGUILayout.BeginScrollView(textureScrollPosition, GUILayout.Height(200));
+
             // Texture Fields
+            EditorGUILayout.BeginHorizontal();
             Texture currentTexR = currentMat.GetTexture("_TexRock");
             Texture newTexR = (Texture)EditorGUILayout.ObjectField("", currentTexR, typeof(Texture), false, GUILayout.Width(60));
+            EditorGUILayout.BeginVertical();
+            EditorGUILayout.LabelField("Randomizer", GUILayout.Width(80));
+            float currentRRandomizer = currentMat.GetFloat("_R_RandomizerIntensity");
+            float newRRandomizer = EditorGUILayout.Slider(currentRRandomizer, 0, 1);
+            EditorGUILayout.EndVertical();
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.BeginHorizontal();
             Texture currentTexG = currentMat.GetTexture("_TexGrass");
             Texture newTexG = (Texture)EditorGUILayout.ObjectField("", currentTexG, typeof(Texture), false, GUILayout.Width(60));
+            EditorGUILayout.BeginVertical();
+            EditorGUILayout.LabelField("Randomizer", GUILayout.Width(80));
+            float currentGRandomizer = currentMat.GetFloat("_G_RandomizerIntensity");
+            float newGRandomizer = EditorGUILayout.Slider(currentGRandomizer, 0, 1);
+            EditorGUILayout.EndVertical();
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.BeginHorizontal();
             Texture currentTexB = currentMat.GetTexture("_TexDirt");
             Texture newTexB = (Texture)EditorGUILayout.ObjectField("", currentTexB, typeof(Texture), false, GUILayout.Width(60));
+            EditorGUILayout.BeginVertical();
+            EditorGUILayout.LabelField("Randomizer", GUILayout.Width(80));
+            float currentBRandomizer = currentMat.GetFloat("_B_RandomizerIntensity");
+            float newBRandomizer = EditorGUILayout.Slider(currentBRandomizer, 0, 1);
+            EditorGUILayout.EndVertical();
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.BeginHorizontal();
             Texture currentTexA = currentMat.GetTexture("_TexPath");
             Texture newTexA = (Texture)EditorGUILayout.ObjectField("", currentTexA, typeof(Texture), false, GUILayout.Width(60));
+            EditorGUILayout.BeginVertical();
+            EditorGUILayout.LabelField("Randomizer", GUILayout.Width(80));
+            float currentARandomizer = currentMat.GetFloat("_A_RandomizerIntensity");
+            float newARandomizer = EditorGUILayout.Slider(currentARandomizer, 0, 1);
+            EditorGUILayout.EndScrollView();
             EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.EndHorizontal();
+            EditorGUILayout.EndVertical();
 
             Rect viewportRect = GUILayoutUtility.GetRect(200, 200, GUILayout.Width(200), GUILayout.Height(200));
             GUI.Box(viewportRect, GUIContent.none, EditorStyles.textArea);
@@ -319,6 +450,11 @@ namespace vilemmakovicka.wvbterrain {
                 if (newTexR != currentTexG) currentMat.SetTexture("_TexGrass", newTexG);
                 if (newTexR != currentTexB) currentMat.SetTexture("_TexDirt", newTexB);
                 if (newTexR != currentTexA) currentMat.SetTexture("_TexPath", newTexA);
+
+                if (newRRandomizer != currentRRandomizer) currentMat.SetFloat("_R_RandomizerIntensity", newRRandomizer);
+                if (newGRandomizer != currentGRandomizer) currentMat.SetFloat("_G_RandomizerIntensity", newGRandomizer);
+                if (newBRandomizer != currentBRandomizer) currentMat.SetFloat("_B_RandomizerIntensity", newBRandomizer);
+                if (newARandomizer != currentARandomizer) currentMat.SetFloat("_A_RandomizerIntensity", newARandomizer);
 
                 EditorUtility.SetDirty(currentMat);
                 SceneView.RepaintAll(); // Updates scene immediately

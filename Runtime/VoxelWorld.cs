@@ -501,6 +501,80 @@ namespace vilemmakovicka.wvbterrain {
                 }
             }
 
+            FinishWorldInitialization();
+        }
+
+        /// <summary>
+        /// Replaces the terrain with one generated from a heightmap.
+        /// The heightmap is stretched over the whole terrain footprint (chunksX * 16 by chunksZ * 16 voxels) and
+        /// its 0..1 values are stretched over the whole terrain height (chunksY * 16 voxels), so the size of the
+        /// terrain in chunks decides the resolution of the result, not the size of the image.
+        /// </summary>
+        /// <param name="heights">Height values in 0..1, row-major: heights[row * width + column]. Row 0 is the bottom row of the image (Texture2D order).</param>
+        /// <param name="width">Heightmap width in pixels (image X maps to terrain X).</param>
+        /// <param name="height">Heightmap height in pixels (image Y maps to terrain Z).</param>
+        public void InitializeWorldFromHeightmap(float[] heights, int width, int height) {
+            if (heights == null || width < 2 || height < 2 || heights.Length < width * height) {
+                Debug.LogError("[VoxelWorld] Invalid heightmap data.");
+                return;
+            }
+
+            InitializeNativeTables();
+
+            int totalX = TotalVoxelsX;
+            int totalY = TotalVoxelsY;
+            int totalZ = TotalVoxelsZ;
+
+            worldDensity = new float[totalX, totalY, totalZ];
+            worldColors = new Color[totalX, totalY, totalZ];
+
+            Color defaultColor = new Color(1f, 0f, 0f, 0f);
+            float maxSurface = totalY - 1;
+
+            // Density falls off by 0.25 per voxel around the surface. A gentle ramp (instead of a hard 0/1 step) lets
+            // marching cubes place the surface between voxels, so heights are not quantized to whole voxels.
+            const float densitySlope = 0.25f;
+
+            for (int x = 0; x < totalX; x++) {
+                float u = totalX > 1 ? x / (float)(totalX - 1) : 0f;
+                for (int z = 0; z < totalZ; z++) {
+                    float v = totalZ > 1 ? z / (float)(totalZ - 1) : 0f;
+
+                    float h01 = Mathf.Clamp01(SampleHeightmapBilinear(heights, width, height, u, v));
+                    float surfaceY = h01 * maxSurface;
+
+                    for (int y = 0; y < totalY; y++) {
+                        // The bottom layer is always solid, same as the flat terrain, so the surface never degenerates at height 0
+                        worldDensity[x, y, z] = (y == 0) ? 1.0f : Mathf.Clamp01(isoLevel + (surfaceY - y) * densitySlope);
+                        worldColors[x, y, z] = defaultColor;
+                    }
+                }
+            }
+
+            FinishWorldInitialization();
+        }
+
+        private static float SampleHeightmapBilinear(float[] heights, int width, int height, float u, float v) {
+            float px = u * (width - 1);
+            float py = v * (height - 1);
+
+            int x0 = Mathf.Clamp(Mathf.FloorToInt(px), 0, width - 1);
+            int y0 = Mathf.Clamp(Mathf.FloorToInt(py), 0, height - 1);
+            int x1 = Mathf.Min(x0 + 1, width - 1);
+            int y1 = Mathf.Min(y0 + 1, height - 1);
+
+            float tx = px - x0;
+            float ty = py - y0;
+
+            float h00 = heights[y0 * width + x0];
+            float h10 = heights[y0 * width + x1];
+            float h01 = heights[y1 * width + x0];
+            float h11 = heights[y1 * width + x1];
+
+            return Mathf.Lerp(Mathf.Lerp(h00, h10, tx), Mathf.Lerp(h01, h11, tx), ty);
+        }
+
+        private void FinishWorldInitialization() {
             CreateChunkObjects();
             UpdateChunkMaterials();
             RebuildAllChunks();
@@ -694,6 +768,92 @@ namespace vilemmakovicka.wvbterrain {
                 if (chunks.ContainsKey(cCoord))
                     RebuildChunk(cCoord);
             }
+        }
+
+        /// <summary>
+        /// Recolors the whole terrain based on how steep the surface is. Overwrites the existing vertex colors
+        /// (texture paint) of every voxel near the surface.
+        /// Surfaces facing up get the upChannel, surfaces facing sideways get the sideChannel, and the transition
+        /// between them (by default the middle of the slope range) gets the transitionChannel.
+        /// Channels are 0 = R, 1 = G, 2 = B, 3 = A. A transitionChannel of -1 means no transition channel: the colors
+        /// are then blended directly between the up and the side channel.
+        /// </summary>
+        /// <param name="flatAngle">Slope angle in degrees (0 = facing straight up) up to which a surface counts as fully flat.</param>
+        /// <param name="steepAngle">Slope angle in degrees from which a surface counts as fully steep (90 = vertical wall).</param>
+        public void ApplySlopeColors(int upChannel, int sideChannel, int transitionChannel, float flatAngle, float steepAngle) {
+            if (worldDensity == null || worldColors == null) return;
+
+            int totalX = TotalVoxelsX;
+            int totalY = TotalVoxelsY;
+            int totalZ = TotalVoxelsZ;
+
+            float span = Mathf.Max(0.01f, steepAngle - flatAngle);
+            bool useTransition = transitionChannel >= 0 && transitionChannel <= 3;
+            float[] w = new float[4];
+
+            for (int x = 0; x < totalX; x++) {
+                for (int y = 0; y < totalY; y++) {
+                    for (int z = 0; z < totalZ; z++) {
+                        // Only voxels next to a density change can be part of the surface; deep inside the ground or high in the air the
+                        // normal is undefined, so the existing color is kept there.
+                        float center = worldDensity[x, y, z];
+                        if (center == ClampedDensity(x + 1, y, z) && center == ClampedDensity(x - 1, y, z) &&
+                            center == ClampedDensity(x, y + 1, z) && center == ClampedDensity(x, y - 1, z) &&
+                            center == ClampedDensity(x, y, z + 1) && center == ClampedDensity(x, y, z - 1)) {
+                            continue;
+                        }
+
+                        Vector3 gradient = ClampedDensityGradient(x, y, z);
+                        if (gradient.sqrMagnitude < 1e-8f) continue;
+
+                        // Density is higher inside the ground, so the surface normal points against the gradient
+                        Vector3 normal = -gradient.normalized;
+                        float angle = Mathf.Acos(Mathf.Clamp(normal.y, -1f, 1f)) * Mathf.Rad2Deg;
+                        float t = Mathf.Clamp01((angle - flatAngle) / span);
+
+                        w[0] = w[1] = w[2] = w[3] = 0f;
+                        if (useTransition) {
+                            // 0 -> pure up, 0.5 -> pure transition, 1 -> pure side
+                            float up = Mathf.Clamp01(1f - 2f * t);
+                            float side = Mathf.Clamp01(2f * t - 1f);
+                            w[upChannel] = up;
+                            w[sideChannel] = side;
+                            w[transitionChannel] = 1f - up - side;
+                        }
+                        else {
+                            w[upChannel] = 1f - t;
+                            w[sideChannel] = t;
+                        }
+
+                        worldColors[x, y, z] = new Color(w[0], w[1], w[2], w[3]);
+                    }
+                }
+            }
+
+            RebuildAllChunks();
+        }
+
+        // Density lookups that repeat the edge voxels instead of treating the outside as empty,
+        // so the sides of the terrain do not get a fake sideways-facing normal.
+        private float ClampedDensity(int x, int y, int z) {
+            x = Mathf.Clamp(x, 0, TotalVoxelsX - 1);
+            y = Mathf.Clamp(y, 0, TotalVoxelsY - 1);
+            z = Mathf.Clamp(z, 0, TotalVoxelsZ - 1);
+            return worldDensity[x, y, z];
+        }
+
+        /// <summary>Sobel gradient of the density field (3x3x3 neighbourhood), smoother than a plain central difference.</summary>
+        private Vector3 ClampedDensityGradient(int x, int y, int z) {
+            float gx = 0f, gy = 0f, gz = 0f;
+            for (int a = -1; a <= 1; a++) {
+                for (int b = -1; b <= 1; b++) {
+                    float weight = (a == 0 ? 2f : 1f) * (b == 0 ? 2f : 1f);
+                    gx += weight * (ClampedDensity(x + 1, y + a, z + b) - ClampedDensity(x - 1, y + a, z + b));
+                    gy += weight * (ClampedDensity(x + a, y + 1, z + b) - ClampedDensity(x + a, y - 1, z + b));
+                    gz += weight * (ClampedDensity(x + a, y + b, z + 1) - ClampedDensity(x + a, y + b, z - 1));
+                }
+            }
+            return new Vector3(gx, gy, gz);
         }
 
         [HideInInspector]
